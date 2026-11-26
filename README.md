@@ -6,7 +6,7 @@ Status: early development; most of what follows is the design, not yet built. Se
 
 ## How it works
 
-- **Desktop app** ([mygo](https://github.com/egoist/mygo), Go + React) talks to your servers over SSH. Keys and tokens stay in your system keychain.
+- **Desktop app** ([mygo](https://github.com/egoist/mygo), native UI in Go) talks to your servers over SSH. Keys and tokens stay in your system keychain.
 - **gogo-agent** runs on each VPS. It opens no ports; it collects metrics and sends alerts and renewal reminders (Telegram, email, webhook, ntfy) even when your computer is off.
 - **Skills** will install services such as Docker, Caddy and Uptime Kuma: Claude drafts a plan, you approve it, and every command is logged.
 
@@ -16,13 +16,13 @@ Skills call the Anthropic API with **your own API key**, entered in Settings and
 
 ## Development
 
-Requires Go 1.27.3+, Bun 1.3+, and macOS for now.
+Requires Go 1.27.3+ and macOS for now. The UI is native, written in Go with mygo's `ui` package; there is no JavaScript toolchain.
 
 ```bash
 cd apps/desktop
-bun install
-bun run dev        # the app, with live reload
-bun run dev:mock   # the UI alone in a browser, against a mock Go side
+go tool mygo dev     # the app, with live reload
+go test ./...        # views run headless through ui.Tester
+go tool mygo build   # package the app
 ```
 
 Check a milestone: `scripts/verify.sh M0`.
