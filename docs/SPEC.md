@@ -292,9 +292,9 @@ v1 内置技能：`docker`、`caddy`（反代 + 自动 HTTPS）、`uptime-kuma`�
 
 ### 8.2 前置条件（M0 之前由用户完成）
 
-- [ ] Go 升级到 **≥ 1.27.3**（本机当前 1.27.1）。
-- [ ] `git init`，建 GitHub 仓库并设置 remote（每个里程碑以 PR 结束）。
-- [ ] `colima start`（当前 Docker daemon 未运行）；lima 已安装 ✓；Bun 1.3.12 ✓。
+- [x] Go ≥ 1.27.3（已升级到 1.27.4）。
+- [x] Git 仓库：github.com/bubbleptr/vpsgogo（每个里程碑以 PR 结束）。
+- [x] colima 运行中（Docker 29.5.2）；lima 已安装；Bun 1.3.12。
 - [ ] 以 auto 模式运行 `/goal`，否则每次工具调用都会停下等授权。
 
 ---
