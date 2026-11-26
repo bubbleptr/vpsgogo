@@ -252,7 +252,7 @@ v1 内置技能：`docker`、`caddy`（反代 + 自动 HTTPS）、`uptime-kuma`�
 |---|---|---|
 | 领域核心 | 单元测试，表驱动；`vault`/`sshx` 有内存/假实现 | `go test ./packages/... ./apps/agent/...` |
 | SSH 集成 | docker 起 Debian 12 / Ubuntu 24.04 sshd 容器（colima） | `go test -tags integration ./test/e2e/...` |
-| 完整加固 + systemd | lima VM（Debian 12），真实 systemd；`test/e2e/lima/fresh-vps.yaml` 用 cloud-init 开启 root 密码登录、不放任何密钥，模拟刚买到的 VPS；lima 的 vz 虚拟机不支持快照，每次测试前删除并重建 VM | `go test -tags vm ./test/e2e/...` |
+| 完整加固 + systemd | lima VM（Debian 12），真实 systemd；`test/e2e/lima/fresh-vps.yaml` 用 cloud-init 开启 root 密码登录，测试再放入一把 root 密钥，模拟刚买到的 VPS；lima 的 vz 虚拟机不支持快照，每次测试前删除并重建 VM | `go test -tags vm ./test/e2e/...` |
 | 技能执行 | 录制的 Claude 响应 fixture 回放（CI 不调真 API）；守卫表驱动测试 | `go test ./packages/core/skills/...` |
 | 前端 | Vite dev server，把生成的 `src/mygo.ts` 别名到 mock 实现；Vitest + Playwright 截图 | `bun run test`、`bun run test:e2e` |
 | 构建 | 能产出 macOS 包 | `cd apps/desktop && bun run build` |

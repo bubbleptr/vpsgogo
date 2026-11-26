@@ -15,6 +15,7 @@ import (
 
 	"github.com/bubbleptr/vpsgogo/packages/core/fleet"
 	"github.com/bubbleptr/vpsgogo/packages/core/sshx"
+	"github.com/bubbleptr/vpsgogo/packages/core/vault"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -144,6 +145,10 @@ func (p *Provisioner) Run(ctx context.Context, id, rootPassword string) error {
 
 	// The key: reuse the stored one so reruns don't pile up authorized keys.
 	pem, err := p.Fleet.PrivateKey(id)
+	if err != nil && !errors.Is(err, vault.ErrNotFound) {
+		// Not proof the key is gone; replacing it could lock VPSGoGo out.
+		return fmt.Errorf("provisioning: read the stored key: %w", err)
+	}
 	if err != nil {
 		key, gerr := sshx.GenerateKey("vpsgogo")
 		if gerr != nil {

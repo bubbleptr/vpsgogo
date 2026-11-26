@@ -56,6 +56,12 @@ func freshVM(t *testing.T) (port int, password string, rootKey ssh.AuthMethod) {
 	if os.Getenv("VPSGOGO_REUSE_VM") == "" {
 		limactl(t, "", "delete", "-f", vmName)
 		mustLimactl(t, "", "start", "--tty=false", "--name", vmName, "lima/fresh-vps.yaml")
+		// Keep a failed run's VM for inspection; don't leave a passing one running.
+		t.Cleanup(func() {
+			if !t.Failed() {
+				limactl(t, "", "delete", "-f", vmName)
+			}
+		})
 	}
 	port, err := strconv.Atoi(mustLimactl(t, "", "list", "--format", "{{.SSHLocalPort}}", vmName))
 	if err != nil {
@@ -160,9 +166,11 @@ func TestProvisionFreshVPS(t *testing.T) {
 	})
 
 	t.Run("a config that locks VPSGoGo out rolls back", func(t *testing.T) {
-		_, err := run("AllowUsers nobody\n")
-		if !errors.Is(err, provisioning.ErrSSHDRolledBack) {
-			t.Fatalf("err = %v", err)
+		// Hardened in every other way, so only the lockout can fail it.
+		lockout := "PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers nobody\n"
+		_, err := run(lockout)
+		if !errors.Is(err, provisioning.ErrSSHDRolledBack) || !sshx.IsAuthError(err) {
+			t.Fatalf("err = %v, want a rollback caused by an auth refusal", err)
 		}
 		rootStillWorks(t)
 	})
@@ -227,6 +235,9 @@ func TestProvisionFreshVPS(t *testing.T) {
 	})
 
 	t.Run("root password is stored nowhere", func(t *testing.T) {
+		if !strings.Contains(log.String(), "## step detect") {
+			t.Fatal("the provisioning log is empty; nothing was checked")
+		}
 		if strings.Contains(log.String(), password) {
 			t.Fatal("root password in the provisioning log")
 		}
