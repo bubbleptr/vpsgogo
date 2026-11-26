@@ -80,6 +80,17 @@ func (r *SQLite) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *SQLite) UpdateUser(ctx context.Context, id, user string) error {
+	res, err := r.db.Execute(ctx, `UPDATE servers SET user = ? WHERE id = ?`, user, id)
+	if err != nil {
+		return err
+	}
+	if res.Changes == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func scan(v []any) (Server, error) {
 	if len(v) != 8 {
 		return Server{}, fmt.Errorf("fleet: row has %d columns", len(v))

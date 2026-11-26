@@ -122,3 +122,22 @@ func TestDeleteRemovesServerAndItsKey(t *testing.T) {
 		t.Fatalf("private key still in the vault: %v", err)
 	}
 }
+
+func TestSetUserPersists(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t)
+	s, err := svc.Add(ctx, NewServer{Host: "203.0.113.7"}, fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetUser(ctx, s.ID, "gogo"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := svc.Get(ctx, s.ID)
+	if got.User != "gogo" {
+		t.Fatalf("user = %q", got.User)
+	}
+	if err := svc.SetUser(ctx, "nope", "gogo"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing server: err = %v", err)
+	}
+}

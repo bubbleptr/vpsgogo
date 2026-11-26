@@ -136,3 +136,33 @@ func TestExecStopsWhenContextEnds(t *testing.T) {
 		t.Fatal("Exec ignored the context")
 	}
 }
+
+func TestAuthorizedKeyMatchesGeneratedKey(t *testing.T) {
+	key, err := GenerateKey("vpsgogo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := AuthorizedKey(key.PrivatePEM, "vpsgogo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != key.AuthorizedKey {
+		t.Fatalf("AuthorizedKey = %q, want %q", line, key.AuthorizedKey)
+	}
+}
+
+func TestIsAuthError(t *testing.T) {
+	s := newTestServer(t)
+	_, err := Dial(context.Background(), Target{Host: s.host, Port: s.port, User: "root"}, ssh.Password("nope"), s.fingerprint())
+	if !IsAuthError(err) {
+		t.Fatalf("wrong password: IsAuthError(%v) = false", err)
+	}
+	_, err = dialRoot(t, s, newTestServer(t).fingerprint())
+	if IsAuthError(err) {
+		t.Fatalf("host key mismatch counted as auth error: %v", err)
+	}
+	_, err = Dial(context.Background(), Target{Host: "127.0.0.1", Port: 1, User: "root"}, ssh.Password("x"), "SHA256:x")
+	if IsAuthError(err) {
+		t.Fatalf("refused connection counted as auth error: %v", err)
+	}
+}

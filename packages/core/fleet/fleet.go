@@ -84,6 +84,7 @@ type Repository interface {
 	Get(ctx context.Context, id string) (Server, error)
 	List(ctx context.Context) ([]Server, error)
 	Delete(ctx context.Context, id string) error
+	UpdateUser(ctx context.Context, id, user string) error
 }
 
 // Service is the fleet's use cases.
@@ -125,6 +126,11 @@ func (s *Service) Add(ctx context.Context, n NewServer, fingerprint string) (Ser
 func (s *Service) Get(ctx context.Context, id string) (Server, error) { return s.repo.Get(ctx, id) }
 
 func (s *Service) List(ctx context.Context) ([]Server, error) { return s.repo.List(ctx) }
+
+// SetUser records the login user, which provisioning switches from root to gogo.
+func (s *Service) SetUser(ctx context.Context, id, user string) error {
+	return s.repo.UpdateUser(ctx, id, user)
+}
 
 // Delete removes the server and its private key.
 func (s *Service) Delete(ctx context.Context, id string) error {

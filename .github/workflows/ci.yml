@@ -28,3 +28,5 @@ jobs:
         with:
           go-version-file: go.mod
       - run: scripts/verify.sh M1
+      # M2's VM test needs lima on a Mac; CI only checks that it compiles.
+      - run: go vet -tags vm ./...

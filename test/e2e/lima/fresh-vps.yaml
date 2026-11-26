@@ -1,0 +1,19 @@
+# A freshly bought Debian 12 VPS: real systemd, root logs in with a password.
+# The vm tests set root's password; see test/e2e/vm_test.go.
+base: template://debian-12
+cpus: 2
+memory: 2GiB
+disk: 10GiB
+mounts: []
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: system
+    script: |
+      #!/bin/sh
+      set -eu
+      # Sorts before cloud-init's 50-cloud-init.conf, as a provider's own
+      # settings would, and after VPSGoGo's 10-vpsgogo.conf.
+      printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' > /etc/ssh/sshd_config.d/40-fresh-vps.conf
+      systemctl reload ssh
