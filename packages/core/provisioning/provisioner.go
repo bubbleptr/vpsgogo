@@ -1,6 +1,7 @@
 // Package provisioning takes a freshly bought server to the state VPSGoGo
 // manages: a gogo user with key login and sudo, hardened sshd, firewall,
-// fail2ban and automatic security updates. Every step is idempotent.
+// fail2ban, automatic security updates and gogo-agent. Every step is
+// idempotent.
 // See docs/SPEC.md §4.1.
 package provisioning
 
@@ -40,7 +41,13 @@ type Provisioner struct {
 	SSHDDropIn string
 	// Dial connects to a server; defaults to sshx.Dial with the pinned key.
 	Dial func(ctx context.Context, srv fleet.Server, user string, auth ssh.AuthMethod) (Session, error)
+	// Agent, when set, installs gogo-agent as the last step.
+	Agent *AgentInstall
 }
+
+// agentHealthTime is how long the agent may take to answer with a sample:
+// its first reading is a baseline, the second (10s later) its first sample.
+const agentHealthTime = 60 * time.Second
 
 // settleTime is how long a new connection may keep failing after sshd or the
 // firewall changed before VPSGoGo concludes it is locked out.
@@ -224,7 +231,42 @@ func (p *Provisioner) Run(ctx context.Context, id, rootPassword string) error {
 	if err := step("fail2ban", func() (bool, error) { return ensureFail2ban(ctx, h, sshPort) }); err != nil {
 		return err
 	}
-	return step("updates", func() (bool, error) { return ensureFile(ctx, h, autoUpgradesPath, autoUpgrades) })
+	if err := step("updates", func() (bool, error) { return ensureFile(ctx, h, autoUpgradesPath, autoUpgrades) }); err != nil {
+		return err
+	}
+	if p.Agent == nil {
+		return nil
+	}
+	// healthy asks the agent for samples as gogo would: over a new
+	// connection, which picks up gogo's new gogo-agent group, and without
+	// sudo.
+	healthy := func(ctx context.Context) error {
+		s, err := settled(ctx, srv, OpsUser, opsAuth)
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		deadline := time.Now().Add(agentHealthTime)
+		for {
+			res, err := s.Exec(ctx, "gogo-agent query --since 0 --json")
+			fmt.Fprintf(log, "$ gogo-agent query --since 0 --json  (as %s)\n[exit %d]\n%s%s", OpsUser, res.Code, clip(res.Stdout), clip(res.Stderr))
+			if err == nil && res.Code == 0 && strings.HasPrefix(strings.TrimSpace(res.Stdout), "[{") {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				if err == nil {
+					err = fmt.Errorf("query exited %d: %s", res.Code, strings.TrimSpace(res.Stderr+res.Stdout))
+				}
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+	return step("agent", func() (bool, error) { return ensureAgent(ctx, h, *p.Agent, healthy) })
 }
 
 // checkHardened looks at sshd -T output (keys are lower case).

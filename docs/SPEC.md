@@ -156,7 +156,7 @@ Go：仓库根一个 module（`github.com/bubbleptr/vpsgogo`），所以 `go bui
 
 ### 4.4 通知渠道（notify）
 
-v1 支持：Telegram Bot、SMTP 邮件、通用 Webhook（JSON POST）、ntfy。每个渠道有「发送测试消息」按钮。渠道凭据在本机存钥匙串；为了关机时也能告警，**必须复制一份到 VPS**：`/etc/gogo-agent/notify.json`（`root:gogo-agent`，0640）。残余风险：VPS 被攻破会泄露这些 token——UI 建议为 VPSGoGo 单独建一个 Bot / Webhook，并支持一键在所有 VPS 上轮换。
+v1 支持：Telegram Bot、SMTP 邮件、通用 Webhook（JSON POST）、ntfy。所有渠道只走 TLS（HTTPS；SMTP 用 465 隐式 TLS 或强制 STARTTLS），不接受 http；自建端点可为渠道配置私有 CA（PEM）。每个渠道有「发送测试消息」按钮。渠道凭据在本机存钥匙串；为了关机时也能告警，**必须复制一份到 VPS**：`/etc/gogo-agent/notify.json`（`root:gogo-agent`，0640）。残余风险：VPS 被攻破会泄露这些 token——UI 建议为 VPSGoGo 单独建一个 Bot / Webhook，并支持一键在所有 VPS 上轮换。
 
 ### 4.5 AI 技能（skills）
 

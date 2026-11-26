@@ -3,6 +3,7 @@ package provisioning
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +25,9 @@ func (scriptedSession) Exec(_ context.Context, cmd string) (sshx.ExecResult, err
 		return sshx.ExecResult{Stdout: strings.Repeat("installed\n", len(basePackages))}, nil
 	}
 	return sshx.ExecResult{Code: 1, Stderr: "unexpected: " + cmd}, nil
+}
+func (s scriptedSession) ExecInput(ctx context.Context, cmd string, _ io.Reader) (sshx.ExecResult, error) {
+	return s.Exec(ctx, cmd)
 }
 func (scriptedSession) Close() error { return nil }
 

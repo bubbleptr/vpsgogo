@@ -35,11 +35,22 @@ m2() {
   step go test -tags vm -count=1 -v -timeout 40m ./test/e2e/...
 }
 
+m3() {
+  step go vet -tags vm ./...
+  step env GOOS=linux go vet ./apps/agent/... ./packages/core/monitoring/...   # the agent's Linux-only code
+  step go test -race -count=1 ./packages/core/monitoring/... ./packages/core/notify/... ./packages/core/provisioning/... ./packages/core/sshx/... ./apps/agent/...
+  step scripts/build-agent.sh
+  # Recreates the lima VM, provisions it with the agent, and checks the agent
+  # serves samples to gogo, listens on no port, and alerts a webhook; local only.
+  step go test -tags vm -count=1 -v -timeout 40m ./test/e2e/...
+}
+
 case "${1:-}" in
   M0) m0 ;;
   M1) m1 ;;
   M2) m2 ;;
-  *) echo "usage: $0 M0|M1|M2   (later milestones are added as they are built)" >&2; exit 2 ;;
+  M3) m3 ;;
+  *) echo "usage: $0 M0|M1|M2|M3   (later milestones are added as they are built)" >&2; exit 2 ;;
 esac
 
 echo
