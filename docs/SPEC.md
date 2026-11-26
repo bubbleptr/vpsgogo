@@ -13,7 +13,7 @@
 | 形态 | 本地桌面 App（[egoist/mygo](https://github.com/egoist/mygo)，Web 前端 + Go 后端，非 cgo），通过 SSH 管理 VPS |
 | VPS 端 | 轻量 `gogo-agent`（Go 单二进制，systemd 服务），负责采集指标与**电脑关机时**的告警/续费推送 |
 | 装服务 | AI Agent Skill：内置 `SKILL.md` 技能包，由 Claude 在用户审批下通过 SSH 执行 |
-| 开源与 AI 计费 | 客户端与 agent 全部开源（MIT，与 mygo 一致；M0 时确认）；AI 为 BYOK，项目方不运营任何服务端、不经手用户数据或费用 |
+| 开源与 AI 计费 | 客户端与 agent 全部开源（MIT）；AI 为 BYOK，项目方不运营任何服务端、不经手用户数据或费用 |
 | 目标用户 | 会买 VPS、但不想学 Linux 运维的个人用户 |
 | 首发平台 | 桌面：macOS（先），Windows / Linux 随后；VPS：Debian 12/13、Ubuntu 22.04/24.04，amd64 / arm64 |
 
