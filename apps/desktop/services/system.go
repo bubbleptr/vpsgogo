@@ -1,4 +1,4 @@
-// Package services adapts packages/core to the frontend through mygo bindings.
+// Package services adapts packages/core and the platform to the views.
 // It holds no business rules.
 package services
 
@@ -6,10 +6,10 @@ import "runtime"
 
 // AppInfo describes the running app.
 type AppInfo struct {
-	Version   string `json:"version"`
-	OS        string `json:"os"`
-	Arch      string `json:"arch"`
-	GoVersion string `json:"goVersion"`
+	Version   string
+	OS        string
+	Arch      string
+	GoVersion string
 }
 
 // System reports facts about the app and the machine it runs on.

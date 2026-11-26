@@ -1,0 +1,6 @@
+{
+  "name": "VPSGoGo",
+  "identifier": "io.github.bubbleptr.vpsgogo",
+  "version": "0.1.0",
+  "out": "build"
+}

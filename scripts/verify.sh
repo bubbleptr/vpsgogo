@@ -14,16 +14,11 @@ step() {
 m0() {
   step go build ./...
   step go vet ./...
-  step go test ./...
+  step go test ./...                           # includes the views, through ui.Tester
   step scripts/build-agent.sh
   cd "$root/apps/desktop"
-  step bun install --frozen-lockfile
-  step bun run generate
-  step git diff --exit-code -- src/mygo.ts   # the committed client matches the Go code
-  step bun run test
-  step bun run build:web
-  step bun run build:web:mock                  # pages build against the mock Go side
-  step bun x mygo doctor
+  step go tool mygo doctor
+  step go tool mygo build -platform darwin/arm64 -skip-dmg -skip-notarize
   cd "$root"
 }
 

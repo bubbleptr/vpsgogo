@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 jobs:
-  # M0 needs a Mac (mygo doctor, the macOS app).
+  # M0 needs a Mac (mygo doctor, the macOS app bundle).
   verify:
     runs-on: macos-latest
     steps:
@@ -14,9 +14,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.12
       - run: scripts/verify.sh M0
 
   # M1 and later need Docker, which GitHub's macOS runners lack.

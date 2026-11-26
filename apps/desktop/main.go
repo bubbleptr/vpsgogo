@@ -3,15 +3,18 @@ package main
 import (
 	"log"
 
+	"github.com/bubbleptr/vpsgogo/apps/desktop/pages/dashboard"
 	"github.com/bubbleptr/vpsgogo/apps/desktop/services"
+	"github.com/bubbleptr/vpsgogo/apps/desktop/shared/theme"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "0.1.0-dev"
 
 func main() {
-	mygo.Bind(services.System{Version: version})
+	page := dashboard.New(services.System{Version: version}.Info())
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{
@@ -20,9 +23,9 @@ func main() {
 			Height:          780,
 			MinWidth:        720,
 			MinHeight:       480,
-			BackgroundColor: "light-dark(#F7F5F0, #1E2440)", // --canvas in src/shared/ui/tokens.css
+			BackgroundColor: theme.WindowBackground,
 			StateKey:        "main",
-			URL:             "/",
+			Content:         ui.View(page.View),
 		})
 	})
 	if err := mygo.App.Run(); err != nil {
