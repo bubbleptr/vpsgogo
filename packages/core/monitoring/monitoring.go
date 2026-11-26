@@ -33,7 +33,7 @@ type Sample struct {
 
 // Rules are the alert thresholds (docs/SPEC.md §4.2 defaults).
 type Rules struct {
-	CPUPercent  float64       `json:"cpuPercent"`  // fires when CPU stays above it for CPUFor
+	CPUPercent  float64       `json:"cpuPercent"` // fires when CPU stays above it for CPUFor
 	CPUFor      time.Duration `json:"cpuFor"`
 	MemPercent  float64       `json:"memPercent"`  // fires as soon as memory is above it
 	DiskPercent float64       `json:"diskPercent"` // per mount
