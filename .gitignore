@@ -1,0 +1,4 @@
+# binaries go build writes when given a single main package
+/desktop
+/gogo-agent
+.DS_Store

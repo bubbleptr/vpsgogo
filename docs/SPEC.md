@@ -13,7 +13,7 @@
 | 形态 | 本地桌面 App（[egoist/mygo](https://github.com/egoist/mygo)，Web 前端 + Go 后端，非 cgo），通过 SSH 管理 VPS |
 | VPS 端 | 轻量 `gogo-agent`（Go 单二进制，systemd 服务），负责采集指标与**电脑关机时**的告警/续费推送 |
 | 装服务 | AI Agent Skill：内置 `SKILL.md` 技能包，由 Claude 在用户审批下通过 SSH 执行 |
-| 开源与 AI 计费 | 客户端与 agent 全部开源（MIT，与 mygo 一致；M0 时确认）；AI 为 BYOK，项目方不运营任何服务端、不经手用户数据或费用 |
+| 开源与 AI 计费 | 客户端与 agent 全部开源（MIT）；AI 为 BYOK，项目方不运营任何服务端、不经手用户数据或费用 |
 | 目标用户 | 会买 VPS、但不想学 Linux 运维的个人用户 |
 | 首发平台 | 桌面：macOS（先），Windows / Linux 随后；VPS：Debian 12/13、Ubuntu 22.04/24.04，amd64 / arm64 |
 
@@ -83,15 +83,15 @@ vpsgogo/
     SPEC.md  CONTEXT.md  adr/
 ```
 
-Go：仓库根一个 module（`github.com/bubbleptr/vpsgogo`），所以 `go build ./...`、`go test ./...` 在根目录直接可用，无需 go.work。M0 须验证 `mygo dev/build` 能在子目录 `apps/desktop` 中使用父级 go.mod；不行再改为 go.work + 每个 module 单独命令，并更新 `scripts/verify.sh`。
+Go：仓库根一个 module（`github.com/bubbleptr/vpsgogo`），所以 `go build ./...`、`go test ./...` 在根目录直接可用，无需 go.work。M0 已核实：`mygo generate` 与 `mygo build` 在 `apps/desktop` 中使用父级 go.mod 可正常工作。
 
 ### 2.2 关键技术选择
 
 | 关注点 | 选择 | 理由 |
 |---|---|---|
 | 桌面框架 | mygo web 模板（Vite + TS），前端用 React + TanStack Router/Query | 像素风需要自定义字体与 CSS，web 窗口最灵活 |
-| 本地数据 | mygo `sqlite` 插件（无 cgo）——Go 侧 API 未读文档，M0 验证 | 服务器、续费、审计日志 |
-| 机密 | `mygo.Secrets`（系统钥匙串）——API 未读文档，M0 验证 | SSH 私钥、Claude API Key、通知渠道 token |
+| 本地数据 | mygo `sqlite` 插件（无 cgo），Go 侧 `sqlite.Open(ctx, path, sqlite.OpenOptions{})`（M0 已核实） | 服务器、续费、审计日志 |
+| 机密 | `mygo.Secrets.Set/Get`（macOS 钥匙串 / libsecret / Windows 凭据管理器；M0 已核实） | SSH 私钥、Claude API Key、通知渠道 token |
 | SSH | `golang.org/x/crypto/ssh` | 纯 Go；自管 known_hosts |
 | LLM | Anthropic Go SDK，Messages API + Tool Runner，在**桌面端本地**跑循环；模型 `claude-opus-5-5`，开启 `fallbacks: "default"` | 工具要用本机钥匙串中的 SSH 私钥执行，循环必须在本地 |
 | agent 分发 | linux/amd64 + linux/arm64 二进制 `go:embed` 进桌面 App，经 SSH 上传并校验 sha256 | 不从公网下载，供应链最短 |
@@ -257,7 +257,7 @@ v1 内置技能：`docker`、`caddy`（反代 + 自动 HTTPS）、`uptime-kuma`�
 | 前端 | Vite dev server，把生成的 `src/mygo.ts` 别名到 mock 实现；Vitest + Playwright 截图 | `bun run test`、`bun run test:e2e` |
 | 构建 | 能产出 macOS 包 | `cd apps/desktop && bun run build` |
 
-前端 mock 绑定是推断方案（mygo 文档未提供官方 mock），M0 需验证可行。
+前端 mock：mygo 无官方 mock，`vite.config.ts` 在 `mock`/`test` 模式下把 `src/mygo.ts` 解析为 `src/shared/api/mygo.mock.ts`（M0 已实现）。
 
 ---
 
