@@ -1,0 +1,49 @@
+/* Design tokens, docs/SPEC.md §9.2. Components use these, never raw colors. */
+:root {
+  color-scheme: light;
+  --canvas: #f7f5f0;
+  --canvas-dot: #e4e0d8;
+  --ink: #161616;
+  --paper: #ffffff;
+  --coral: #e8664a;
+  --amber: #f2b63d;
+  --teal: #1fa7b8;
+  --green: #2fa36b;
+  --cream: #ece8df;
+
+  --blob-sky: #4a9bf0;
+  --blob-lake: #22a6c3;
+  --blob-forest: #2e9e6a;
+  --blob-grass: #9bc63b;
+  --blob-pink: #ee6aa7;
+  --blob-purple: #7b5ce0;
+  --blob-royal: #2d55d6;
+  --blob-orange: #f28a3c;
+  --blob-yellow: #f0b93a;
+  --blob-coral: #e25a44;
+
+  --font-ui: "Inter", "PingFang SC", "HarmonyOS Sans SC", system-ui, sans-serif;
+  --border: 3px solid var(--ink);
+  --radius-card: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --canvas: #1e2440;
+    --canvas-dot: #2c3354;
+    --ink: #ffffff;
+    --paper: #262d4d;
+    --cream: #323a5e;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
