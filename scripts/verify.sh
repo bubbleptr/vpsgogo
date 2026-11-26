@@ -27,9 +27,16 @@ m0() {
   cd "$root"
 }
 
+m1() {
+  step go vet -tags integration ./...
+  step go test -race -count=1 ./packages/...
+  step go test -tags integration -count=1 -v ./test/e2e/...   # Docker sshd: Debian 12, Ubuntu 24.04
+}
+
 case "${1:-}" in
   M0) m0 ;;
-  *) echo "usage: $0 M0   (later milestones are added as they are built)" >&2; exit 2 ;;
+  M1) m1 ;;
+  *) echo "usage: $0 M0|M1   (later milestones are added as they are built)" >&2; exit 2 ;;
 esac
 
 echo
