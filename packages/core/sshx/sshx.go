@@ -178,8 +178,21 @@ func GenerateKey(comment string) (Key, error) {
 	if err != nil {
 		return Key{}, err
 	}
-	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))) + " " + comment
-	return Key{PrivatePEM: pem.EncodeToMemory(block), AuthorizedKey: line}, nil
+	return Key{PrivatePEM: pem.EncodeToMemory(block), AuthorizedKey: authorizedLine(sshPub, comment)}, nil
+}
+
+// AuthorizedKey returns the authorized_keys line for a private key from
+// GenerateKey, so a stored key can be installed again.
+func AuthorizedKey(privatePEM []byte, comment string) (string, error) {
+	signer, err := ssh.ParsePrivateKey(privatePEM)
+	if err != nil {
+		return "", fmt.Errorf("sshx: parse private key: %w", err)
+	}
+	return authorizedLine(signer.PublicKey(), comment), nil
+}
+
+func authorizedLine(pub ssh.PublicKey, comment string) string {
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub))) + " " + comment
 }
 
 // PrivateKey turns a PEM private key from GenerateKey into an AuthMethod.
@@ -193,3 +206,9 @@ func PrivateKey(privatePEM []byte) (ssh.AuthMethod, error) {
 
 // Password authenticates with a password, used once for a fresh server's root.
 func Password(password string) ssh.AuthMethod { return ssh.Password(password) }
+
+// IsAuthError reports whether err means the server refused the credentials,
+// as opposed to an unreachable server or a host key mismatch.
+func IsAuthError(err error) bool {
+	return err != nil && !errors.Is(err, ErrHostKeyMismatch) && strings.Contains(err.Error(), "ssh: unable to authenticate")
+}

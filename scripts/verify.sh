@@ -33,10 +33,18 @@ m1() {
   step go test -tags integration -count=1 -v ./test/e2e/...   # Docker sshd: Debian 12, Ubuntu 24.04
 }
 
+m2() {
+  step go vet -tags vm ./...
+  step go test -race -count=1 ./packages/core/provisioning/...
+  # Recreates the lima VM test/e2e/lima/fresh-vps.yaml (Debian 12); local only.
+  step go test -tags vm -count=1 -v -timeout 40m ./test/e2e/...
+}
+
 case "${1:-}" in
   M0) m0 ;;
   M1) m1 ;;
-  *) echo "usage: $0 M0|M1   (later milestones are added as they are built)" >&2; exit 2 ;;
+  M2) m2 ;;
+  *) echo "usage: $0 M0|M1|M2   (later milestones are added as they are built)" >&2; exit 2 ;;
 esac
 
 echo
