@@ -206,3 +206,41 @@ func TestSamplesSurviveRestart(t *testing.T) {
 		t.Errorf("first sample after restart %v, want %v", after[0].Time, before[0].Time)
 	}
 }
+
+func TestSlowProbeDoesNotStallSampling(t *testing.T) {
+	h := newHarness(t)
+	h.opts.Rules.Probes = []string{"https://slow.example"}
+	release := make(chan struct{})
+	h.opts.Probe = func(ctx context.Context, _ string) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}
+	h.start()
+	defer close(release)
+	eventually(t, "samples while a probe hangs", func() bool {
+		got, _ := Query(context.Background(), h.opts.SocketPath, time.Time{})
+		return len(got) >= 5
+	})
+}
+
+func TestConfigRejectsPlainHTTP(t *testing.T) {
+	dir := t.TempDir()
+	for name, cfg := range map[string]string{
+		"probe":     `{"rules":{"probes":["http://example.com/health"]}}`,
+		"heartbeat": `{"heartbeat":"http://hc-ping.com/abc"}`,
+	} {
+		p := filepath.Join(dir, name+".json")
+		os.WriteFile(p, []byte(cfg), 0o600)
+		if _, err := LoadConfig(p); err == nil {
+			t.Errorf("%s: an http:// URL was accepted", name)
+		}
+	}
+	p := filepath.Join(dir, "ok.json")
+	os.WriteFile(p, []byte(`{"name":"vps","heartbeat":"https://hc-ping.com/abc"}`), 0o600)
+	if c, err := LoadConfig(p); err != nil || c.Rules.CPUPercent != 90 {
+		t.Errorf("valid config: %+v %v (missing rules should take the defaults)", c, err)
+	}
+}

@@ -78,7 +78,13 @@ func Run(ctx context.Context, o Options) error {
 		go func() { defer wg.Done(); heartbeat(ctx, o) }()
 	}
 
-	engine := monitoring.NewEngine(o.Rules)
+	// Checks and notices run apart from sampling: a hanging probe or a slow
+	// channel delays alerts, never samples. While the checker is busy, newer
+	// samples replace the one waiting for it.
+	pending := make(chan monitoring.Sample, 1)
+	wg.Add(1)
+	go func() { defer wg.Done(); check(ctx, o, pending) }()
+
 	tick := time.NewTicker(o.Interval)
 	defer tick.Stop()
 	lastSave := time.Now()
@@ -100,14 +106,31 @@ func Run(ctx context.Context, o Options) error {
 			}
 			store.Add(s)
 			hub.publish(s)
-			for _, ev := range engine.Observe(observe(ctx, o, s)) {
-				send(ctx, o, ev)
+			select {
+			case <-pending: // drop the sample the checker did not get to
+			default:
 			}
+			pending <- s
 			if now.Sub(lastSave) >= o.SaveEvery {
 				if err := save(store, o.StatePath); err != nil {
 					o.Log.Printf("save: %v", err)
 				}
 				lastSave = now
+			}
+		}
+	}
+}
+
+// check evaluates the alert rules on each sample it receives until ctx ends.
+func check(ctx context.Context, o Options, samples <-chan monitoring.Sample) {
+	engine := monitoring.NewEngine(o.Rules)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case s := <-samples:
+			for _, ev := range engine.Observe(observe(ctx, o, s)) {
+				send(ctx, o, ev)
 			}
 		}
 	}

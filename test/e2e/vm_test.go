@@ -247,9 +247,7 @@ func TestProvisionFreshVPS(t *testing.T) {
 		if strings.Contains(ss, "gogo-agent") {
 			t.Errorf("gogo-agent listens on a port:\n%s", ss)
 		}
-		if out := mustVM(t, "stat -c '%a %U:%G' /etc/gogo-agent/notify.json"); out != "640 root:gogo-agent" {
-			t.Errorf("notify.json is %s", out)
-		}
+		agentFilesPrivate(t)
 
 		// gogo reads samples over a new login, without sudo.
 		pem, _ := fl.PrivateKey(srv.ID)
@@ -319,6 +317,7 @@ func TestProvisionFreshVPS(t *testing.T) {
 		if out, _ := vmShell(t, "ufw status | grep -Ec '^22/tcp +ALLOW +Anywhere *$'"); out != "1" {
 			t.Errorf("ufw IPv4 22/tcp rules = %s", out)
 		}
+		agentFilesPrivate(t)
 		if after, _ := vmShell(t, "ufw status verbose"); after != ufwBefore {
 			t.Errorf("ufw changed on rerun:\n%s\n---\n%s", ufwBefore, after)
 		}
@@ -345,6 +344,21 @@ func TestProvisionFreshVPS(t *testing.T) {
 			t.Fatal("no database files to check")
 		}
 	})
+}
+
+// agentFilesPrivate checks that only root and the gogo-agent group can read
+// the agent's configuration, whose notify.json holds channel tokens.
+func agentFilesPrivate(t *testing.T) {
+	t.Helper()
+	for path, want := range map[string]string{
+		"/etc/gogo-agent":             "750 root:gogo-agent",
+		"/etc/gogo-agent/notify.json": "640 root:gogo-agent",
+		"/var/lib/gogo-agent":         "750 gogo-agent:gogo-agent",
+	} {
+		if out := mustVM(t, "stat -c '%a %U:%G' "+path); out != want {
+			t.Errorf("%s is %s, want %s", path, out, want)
+		}
+	}
 }
 
 // mustVM is vmShell that fails the test on error.

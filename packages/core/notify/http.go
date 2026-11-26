@@ -40,6 +40,9 @@ func post(ctx context.Context, client *http.Client, target, contentType string, 
 	req.Header.Set("Content-Type", contentType)
 	resp, err := client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("post: %w", ctx.Err())
+		}
 		var ue *url.Error
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("post: %w", ue.Err)

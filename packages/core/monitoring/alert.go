@@ -32,14 +32,8 @@ func (e *Engine) Observe(o Observation) []Event {
 	now := o.Sample.Time
 	conds := e.conditions(o)
 
-	// A key that notified but is no longer evaluated (a disk that vanished)
-	// resolves rather than staying open forever.
-	for key := range e.notified {
-		if _, ok := conds[key]; !ok {
-			conds[key] = condition{ok: vanishedText(key)}
-		}
-	}
-
+	// A notified key missing from conds (a disk statfs skipped, or Total 0) is
+	// unknown, not recovered: it keeps its state and emits nothing.
 	var events []Event
 	for key, c := range conds {
 		last, notified := e.notified[key]
@@ -117,13 +111,6 @@ func (e *Engine) conditions(o Observation) map[string]condition {
 		conds["probe:"+url] = c
 	}
 	return conds
-}
-
-func vanishedText(key string) string {
-	if mount, ok := strings.CutPrefix(key, "disk:"); ok {
-		return fmt.Sprintf("Disk %s is no longer reported", mount)
-	}
-	return fmt.Sprintf("%s is no longer checked", key)
 }
 
 // formatDuration prints d to the second without trailing zero units: 5m, 1h5m, 1m30s.

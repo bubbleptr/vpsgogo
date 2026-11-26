@@ -100,8 +100,21 @@ func TestEngineDisks(t *testing.T) {
 	run(t, DefaultRules(), []step{
 		{0, disks(Disk{"/", 90, 100}, Disk{"/data", 10, 100}, Disk{"/empty", 0, 0}), []string{"disk:/+"}},
 		{time.Minute, disks(Disk{"/", 50, 100}, Disk{"/data", 86, 100}), []string{"disk:/-", "disk:/data+"}},
-		// /data disappears (unmounted, or statfs failed): resolve instead of keeping it forever.
-		{2 * time.Minute, disks(Disk{"/", 50, 100}), []string{"disk:/data-"}},
+	})
+}
+
+func TestEngineMissingDiskIsUnknown(t *testing.T) {
+	// A notified disk that is missing (statfs failed once) or reports Total 0
+	// is unknown, not recovered: no event, and the cooldown keeps running.
+	disks := func(d ...Disk) func(*Observation) { return func(o *Observation) { o.Sample.Disks = d } }
+	run(t, DefaultRules(), []step{
+		{0, disks(Disk{"/data", 90, 100}), []string{"disk:/data+"}},
+		{time.Minute, disks(), nil},
+		{2 * time.Minute, disks(Disk{"/data", 0, 0}), nil},
+		{3 * time.Minute, disks(Disk{"/data", 90, 100}), nil}, // still within the cooldown
+		{time.Hour, disks(), nil},
+		{time.Hour + time.Minute, disks(Disk{"/data", 90, 100}), []string{"disk:/data+"}},
+		{time.Hour + 2*time.Minute, disks(Disk{"/data", 50, 100}), []string{"disk:/data-"}},
 	})
 }
 

@@ -198,11 +198,11 @@ func (h *remote) FileSHA256(ctx context.Context, path string) (string, bool, err
 func (h *remote) Upload(ctx context.Context, path, mode, owner string, data []byte) error {
 	sum := sha256.Sum256(data)
 	dir := path[:strings.LastIndex(path, "/")]
-	// mktemp creates the file 0600 root:root; it takes its final owner and
-	// mode before it is renamed into place, and only if the bytes arrived
-	// intact.
+	// The directory exists (EnsureAgentUser makes /etc/gogo-agent) and keeps
+	// its mode. mktemp creates the file 0600 root:root; it takes its final
+	// owner and mode before it is renamed into place, and only if the bytes
+	// arrived intact.
 	script := fmt.Sprintf(`set -e
-install -d -m 0755 %[1]s
 t=$(mktemp %[1]s/.vpsgogo-XXXXXX)
 trap 'rm -f "$t"' EXIT
 cat > "$t"

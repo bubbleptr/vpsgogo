@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net"
 	"net/smtp"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +32,14 @@ func (*smtpChannel) Name() string { return "smtp" }
 // Send delivers m over TLS only: implicit TLS on port 465, otherwise
 // mandatory STARTTLS. Nothing, credentials included, crosses in clear text.
 func (s *smtpChannel) Send(ctx context.Context, m Message) error {
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
 	err := s.send(ctx, m)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		// The connection deadline is ctx's deadline; the net timeout can fire
+		// before ctx's timer does. Wait for it so the error reports ctx.
+		<-ctx.Done()
+	}
 	if err != nil && ctx.Err() != nil {
 		return fmt.Errorf("smtp: %w", ctx.Err())
 	}
@@ -43,9 +51,6 @@ func (s *smtpChannel) send(ctx context.Context, m Message) error {
 	if port == 0 {
 		port = 587
 	}
-	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
-	defer cancel()
-
 	raw, err := s.dial(ctx, "tcp", net.JoinHostPort(s.cfg.Host, strconv.Itoa(port)))
 	if err != nil {
 		return fmt.Errorf("smtp: dial: %w", err)
