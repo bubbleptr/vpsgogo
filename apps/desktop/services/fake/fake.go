@@ -234,10 +234,11 @@ func (b *Backend) History(ctx context.Context, id string, since time.Time) ([]mo
 }
 
 // Stream delivers the samples pushed for id, then returns the error set
-// with FailStream, once, or nil as if ctx ended.
+// with FailStream, once, or nil as if ctx ended. Its call records the id
+// and whether ctx had already ended.
 func (b *Backend) Stream(ctx context.Context, id string, f func(monitoring.Sample)) error {
 	b.mu.Lock()
-	b.record("Stream", id)
+	b.record("Stream", id, ctx.Err() != nil)
 	queued := b.stream[id]
 	delete(b.stream, id)
 	err := b.streamErr[id]
