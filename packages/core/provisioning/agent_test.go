@@ -201,3 +201,52 @@ func TestUploadKeepsContentOutOfCommandsAndLog(t *testing.T) {
 		t.Errorf("upload command %q", cmd)
 	}
 }
+
+func TestSyncAgentConfigRestartsOnlyOnChange(t *testing.T) {
+	h := newFakeAgentHost()
+	ctx := context.Background()
+	if _, err := ensureAgent(ctx, h, testInstall(), healthy); err != nil {
+		t.Fatal(err)
+	}
+	h.systemctl = nil
+	checked := 0
+	counted := func(context.Context) error { checked++; return nil }
+
+	changed, err := syncAgentConfig(ctx, h, testInstall().Config, counted)
+	if err != nil || changed || len(h.systemctl) != 0 {
+		t.Fatalf("same config: changed=%v err=%v systemctl=%v", changed, err, h.systemctl)
+	}
+	cfg := []byte(`{"name":"vps","renewal":{"serverId":"s1","expiresAt":"2026-12-01","cycle":"monthly"}}`)
+	changed, err = syncAgentConfig(ctx, h, cfg, counted)
+	if err != nil || !changed {
+		t.Fatalf("new config: changed=%v err=%v", changed, err)
+	}
+	if string(h.blobs[agentConfigPath]) != string(cfg) || h.modes[agentConfigPath] != "0644 root:root" {
+		t.Errorf("agent.json %q %q", h.blobs[agentConfigPath], h.modes[agentConfigPath])
+	}
+	if strings.Join(h.systemctl, ";") != "restart gogo-agent" {
+		t.Errorf("systemctl %v", h.systemctl)
+	}
+	if checked != 2 {
+		t.Errorf("health checked %d times, want after every sync", checked)
+	}
+}
+
+func TestSyncAgentConfigFailsWhenTheAgentDoesNotComeBack(t *testing.T) {
+	h := newFakeAgentHost()
+	ctx := context.Background()
+	if _, err := ensureAgent(ctx, h, testInstall(), healthy); err != nil {
+		t.Fatal(err)
+	}
+	_, err := syncAgentConfig(ctx, h, []byte(`{"timezone":"Mars/Olympus"}`), func(context.Context) error { return errors.New("connection refused") })
+	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSyncAgentConfigNeedsAnInstalledAgent(t *testing.T) {
+	h := newFakeAgentHost()
+	if _, err := syncAgentConfig(context.Background(), h, []byte(`{}`), healthy); err == nil {
+		t.Fatal("synced to a server without gogo-agent")
+	}
+}

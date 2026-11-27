@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -148,6 +149,30 @@ func ensureAgent(ctx context.Context, h agentHost, in AgentInstall, healthy func
 		return changed, fmt.Errorf("provisioning: gogo-agent is not answering: %w", err)
 	}
 	return changed || restart, nil
+}
+
+// syncAgentConfig writes agent.json on a server where the agent is
+// installed, restarts the agent if the file changed, and checks it answers:
+// a config the agent rejects shows up here, not as a silent crash loop.
+func syncAgentConfig(ctx context.Context, h agentHost, config []byte, healthy func(context.Context) error) (bool, error) {
+	if _, exists, err := h.FileSHA256(ctx, agentBinPath); err != nil {
+		return false, err
+	} else if !exists {
+		return false, errors.New("provisioning: gogo-agent is not installed; provision the server first")
+	}
+	changed, err := ensureBlob(ctx, h, agentConfigPath, "0644", "root:root", config)
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		if err := h.Systemctl(ctx, "restart", "gogo-agent"); err != nil {
+			return true, err
+		}
+	}
+	if err := healthy(ctx); err != nil {
+		return changed, fmt.Errorf("provisioning: gogo-agent is not answering: %w", err)
+	}
+	return changed, nil
 }
 
 // ensureBlob uploads data to path unless the file there already has its hash.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/bubbleptr/vpsgogo/packages/core/monitoring"
 	"github.com/bubbleptr/vpsgogo/packages/core/notify"
+	"github.com/bubbleptr/vpsgogo/packages/core/renewal"
 )
 
 // Config is /etc/gogo-agent/agent.json, which the desktop app writes. It holds
@@ -20,6 +21,30 @@ type Config struct {
 	Name      string           `json:"name"`
 	Rules     monitoring.Rules `json:"rules"`
 	Heartbeat string           `json:"heartbeat,omitempty"` // HTTPS URL pinged every minute, Healthchecks.io style
+
+	// Renewal is the server's plan, for renewal reminders.
+	Renewal *renewal.Subscription `json:"renewal,omitempty"`
+	// Timezone is the user's, such as "Asia/Shanghai": reminders go by the
+	// user's calendar, not the server's. Empty means UTC.
+	Timezone string `json:"timezone,omitempty"`
+	// RemindHour is the hour of the day reminders go out from; default 9.
+	RemindHour *int `json:"remindHour,omitempty"`
+}
+
+// Location is the user's time zone.
+func (c Config) Location() (*time.Location, error) {
+	if c.Timezone == "" {
+		return time.UTC, nil
+	}
+	return time.LoadLocation(c.Timezone)
+}
+
+// RemindHourOr9 is RemindHour, or 9 when it is not set.
+func (c Config) RemindHourOr9() int {
+	if c.RemindHour == nil {
+		return 9
+	}
+	return *c.RemindHour
 }
 
 // LoadConfig reads and checks agent.json. Missing rules take the defaults.
@@ -38,6 +63,17 @@ func LoadConfig(path string) (Config, error) {
 		}
 		if p, err := url.Parse(u); err != nil || p.Scheme != "https" || p.Host == "" {
 			return c, fmt.Errorf("%s: %q is not an https URL", path, u)
+		}
+	}
+	if _, err := c.Location(); err != nil {
+		return c, fmt.Errorf("%s: timezone %q: %w", path, c.Timezone, err)
+	}
+	if h := c.RemindHourOr9(); h < 0 || h > 23 {
+		return c, fmt.Errorf("%s: remindHour %d is not an hour of the day", path, h)
+	}
+	if c.Renewal != nil {
+		if err := c.Renewal.Validate(); err != nil {
+			return c, fmt.Errorf("%s: %w", path, err)
 		}
 	}
 	return c, nil

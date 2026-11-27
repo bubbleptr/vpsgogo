@@ -66,33 +66,8 @@ const fail2banJailPath = "/etc/fail2ban/jail.d/vpsgogo.conf"
 // Run provisions server id. rootPassword is used only while the server still
 // logs in as root (the first run); later runs log in as gogo with its key.
 func (p *Provisioner) Run(ctx context.Context, id, rootPassword string) error {
-	log := p.Log
-	if log == nil {
-		log = io.Discard
-	}
-	dial := p.Dial
-	if dial == nil {
-		dial = func(ctx context.Context, srv fleet.Server, user string, auth ssh.AuthMethod) (Session, error) {
-			return sshx.Dial(ctx, sshx.Target{Host: srv.Host, Port: srv.Port, User: user}, auth, srv.HostKeyFP)
-		}
-	}
-	// settled retries a dial for a while when the connection itself fails:
-	// right after a reload sshd re-executes and resets new connections.
-	// Refused credentials and host key mismatches are final.
-	settled := func(ctx context.Context, srv fleet.Server, user string, auth ssh.AuthMethod) (Session, error) {
-		deadline := time.Now().Add(settleTime)
-		for {
-			s, err := dial(ctx, srv, user, auth)
-			if err == nil || sshx.IsAuthError(err) || errors.Is(err, sshx.ErrHostKeyMismatch) || time.Now().After(deadline) {
-				return s, err
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(500 * time.Millisecond):
-			}
-		}
-	}
+	log := p.log()
+	dial, settled := p.dial, p.settled
 	dropIn := p.SSHDDropIn
 	if dropIn == "" {
 		dropIn = sshdDropIn
@@ -237,11 +212,48 @@ func (p *Provisioner) Run(ctx context.Context, id, rootPassword string) error {
 	if p.Agent == nil {
 		return nil
 	}
-	// healthy asks the agent for samples as gogo would: over a new
-	// connection, which picks up gogo's new gogo-agent group, and without
-	// sudo.
-	healthy := func(ctx context.Context) error {
-		s, err := settled(ctx, srv, OpsUser, opsAuth)
+	healthy := p.agentHealthy(srv, opsAuth)
+	return step("agent", func() (bool, error) { return ensureAgent(ctx, h, *p.Agent, healthy) })
+}
+
+func (p *Provisioner) log() io.Writer {
+	if p.Log == nil {
+		return io.Discard
+	}
+	return p.Log
+}
+
+func (p *Provisioner) dial(ctx context.Context, srv fleet.Server, user string, auth ssh.AuthMethod) (Session, error) {
+	if p.Dial != nil {
+		return p.Dial(ctx, srv, user, auth)
+	}
+	return sshx.Dial(ctx, sshx.Target{Host: srv.Host, Port: srv.Port, User: user}, auth, srv.HostKeyFP)
+}
+
+// settled retries a dial for a while when the connection itself fails:
+// right after a reload sshd re-executes and resets new connections.
+// Refused credentials and host key mismatches are final.
+func (p *Provisioner) settled(ctx context.Context, srv fleet.Server, user string, auth ssh.AuthMethod) (Session, error) {
+	deadline := time.Now().Add(settleTime)
+	for {
+		s, err := p.dial(ctx, srv, user, auth)
+		if err == nil || sshx.IsAuthError(err) || errors.Is(err, sshx.ErrHostKeyMismatch) || time.Now().After(deadline) {
+			return s, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// agentHealthy asks the agent for samples as gogo would: over a new
+// connection, which picks up gogo's new gogo-agent group, and without sudo.
+func (p *Provisioner) agentHealthy(srv fleet.Server, auth ssh.AuthMethod) func(context.Context) error {
+	log := p.log()
+	return func(ctx context.Context) error {
+		s, err := p.settled(ctx, srv, OpsUser, auth)
 		if err != nil {
 			return err
 		}
@@ -266,7 +278,35 @@ func (p *Provisioner) Run(ctx context.Context, id, rootPassword string) error {
 			}
 		}
 	}
-	return step("agent", func() (bool, error) { return ensureAgent(ctx, h, *p.Agent, healthy) })
+}
+
+// SyncAgentConfig writes config as /etc/gogo-agent/agent.json on a
+// provisioned server, restarts gogo-agent if it changed, and checks the
+// agent answers. The desktop app calls it whenever the server's plan or
+// rules change (docs/SPEC.md §4.3).
+func (p *Provisioner) SyncAgentConfig(ctx context.Context, id string, config []byte) (bool, error) {
+	srv, err := p.Fleet.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if srv.User != OpsUser {
+		return false, errors.New("provisioning: the server is not provisioned yet")
+	}
+	pem, err := p.Fleet.PrivateKey(id)
+	if err != nil {
+		return false, err
+	}
+	auth, err := sshx.PrivateKey(pem)
+	if err != nil {
+		return false, err
+	}
+	s, err := p.settled(ctx, srv, OpsUser, auth)
+	if err != nil {
+		return false, fmt.Errorf("provisioning: connect: %w", err)
+	}
+	defer s.Close()
+	h := &remote{s: s, root: false, log: p.log()}
+	return syncAgentConfig(ctx, h, config, p.agentHealthy(srv, auth))
 }
 
 // checkHardened looks at sshd -T output (keys are lower case).

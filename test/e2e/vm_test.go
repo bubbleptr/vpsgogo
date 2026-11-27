@@ -22,6 +22,7 @@ import (
 	"github.com/bubbleptr/vpsgogo/packages/core/monitoring"
 	"github.com/bubbleptr/vpsgogo/packages/core/notify"
 	"github.com/bubbleptr/vpsgogo/packages/core/provisioning"
+	"github.com/bubbleptr/vpsgogo/packages/core/renewal"
 	"github.com/bubbleptr/vpsgogo/packages/core/sshx"
 	"github.com/bubbleptr/vpsgogo/packages/core/vault"
 	"golang.org/x/crypto/ssh"
@@ -342,6 +343,49 @@ func TestProvisionFreshVPS(t *testing.T) {
 		}
 		if len(entries) == 0 {
 			t.Fatal("no database files to check")
+		}
+	})
+
+	// Last: syncing a new agent.json restarts the agent, which would make the
+	// rerun above see a change.
+	t.Run("renewal reminder", func(t *testing.T) {
+		// The plan expires tomorrow by the VM's clock, in UTC, which the
+		// config names as the user's zone; reminders may go out at any hour.
+		today, err := renewal.ParseDate(mustVM(t, "date -u +%F"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sub := renewal.Subscription{ServerID: srv.ID, ExpiresAt: today.AddDays(1), Cycle: renewal.Monthly, Price: "4.50", Currency: "USD", RenewURL: "https://example.com/billing"}
+		cfg, _ := json.Marshal(map[string]any{"name": "lima-vps", "rules": rules, "renewal": sub, "timezone": "UTC", "remindHour": 0})
+		p := &provisioning.Provisioner{Fleet: fl, Log: &log}
+		changed, err := p.SyncAgentConfig(ctx, srv.ID, cfg)
+		if err != nil || !changed {
+			t.Fatalf("sync: changed=%v err=%v\n%s", changed, err, mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+
+		// The restart re-sends the unit alert too; look for the reminder.
+		var got *notify.Message
+		for deadline := time.Now().Add(60 * time.Second); got == nil && time.Now().Before(deadline); time.Sleep(time.Second) {
+			for _, m := range hook.messages() {
+				if strings.HasPrefix(m.Title, "Renewal:") {
+					got = &m
+					break
+				}
+			}
+		}
+		if got == nil {
+			t.Fatalf("no renewal reminder reached the webhook\n%s", mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+		// Near midnight UTC "tomorrow" may have become "today".
+		if got.Server != "lima-vps" || (got.Title != "Renewal: expires tomorrow" && got.Title != "Renewal: expires today") ||
+			!strings.Contains(got.Text, sub.ExpiresAt.String()) || !strings.Contains(got.Text, "4.50 USD") {
+			t.Errorf("reminder %+v", *got)
+		}
+		if out, _ := vmShell(t, "stat -c '%a %U:%G' /var/lib/gogo-agent/renewal.json"); out != "600 gogo-agent:gogo-agent" {
+			t.Errorf("renewal.json is %q", out)
+		}
+		if changed, err := p.SyncAgentConfig(ctx, srv.ID, cfg); err != nil || changed {
+			t.Errorf("syncing the same config again: changed=%v err=%v", changed, err)
 		}
 	})
 }

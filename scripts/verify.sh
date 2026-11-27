@@ -45,12 +45,25 @@ m3() {
   step go test -tags vm -count=1 -v -timeout 40m ./test/e2e/...
 }
 
+m4() {
+  step go vet -tags vm ./...
+  step env GOOS=linux go vet ./apps/agent/...
+  # Plans: the day it expires, expired, leap years, month ends, renewing.
+  step go test -race -count=1 -v ./packages/core/renewal/...
+  step go test -race -count=1 ./packages/core/renewal/... ./packages/core/provisioning/... ./apps/agent/...
+  step scripts/build-agent.sh
+  # Recreates the lima VM, provisions it, syncs a plan that expires tomorrow
+  # and checks the agent's reminder reaches a webhook; local only.
+  step go test -tags vm -count=1 -v -timeout 40m ./test/e2e/...
+}
+
 case "${1:-}" in
   M0) m0 ;;
   M1) m1 ;;
   M2) m2 ;;
   M3) m3 ;;
-  *) echo "usage: $0 M0|M1|M2|M3   (later milestones are added as they are built)" >&2; exit 2 ;;
+  M4) m4 ;;
+  *) echo "usage: $0 M0|M1|M2|M3|M4   (later milestones are added as they are built)" >&2; exit 2 ;;
 esac
 
 echo
