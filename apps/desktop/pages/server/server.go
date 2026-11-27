@@ -51,6 +51,7 @@ type Page struct {
 	histGen, streamGen int
 	cancel             context.CancelFunc
 	streamErr          string
+	historyErr         string
 
 	form       *planform.Form // the plan being added or edited
 	planMsg    string
@@ -88,18 +89,28 @@ func (p *Page) loadHistory() {
 	p.o.Runner.Go(func(post func(func())) {
 		samples, err := p.o.Backend.History(context.Background(), id, since)
 		post(func() {
-			if gen != p.histGen || err != nil {
-				return // the stream shows connection trouble
+			if gen != p.histGen {
+				return
 			}
-			p.samples = mergeLive(samples, p.samples)
+			if err != nil {
+				p.historyErr = err.Error()
+				samples = nil // the range still applies to what was streamed
+			} else {
+				p.historyErr = ""
+			}
+			p.samples = mergeLive(samples, p.samples, since)
 		})
 	})
 }
 
-// mergeLive keeps the samples streamed after the history's last.
-func mergeLive(history, current []monitoring.Sample) []monitoring.Sample {
+// mergeLive adds to history the current samples it does not hold: those
+// taken from since on, after the history's last.
+func mergeLive(history, current []monitoring.Sample, since time.Time) []monitoring.Sample {
 	out := history
 	for _, s := range current {
+		if s.Time.Before(since) {
+			continue
+		}
 		if len(history) == 0 || s.Time.After(history[len(history)-1].Time) {
 			out = append(out, s)
 		}
@@ -169,6 +180,14 @@ func (p *Page) metrics(c *ui.Context, pal theme.Palette) {
 			ui.Text(c, "Live updates stopped: "+p.streamErr).TextColor(theme.Coral)
 			if ui.Button(c, "Reconnect").Clicked() {
 				p.stream()
+			}
+		})
+	}
+	if p.historyErr != "" {
+		ui.Row(c).Gap(12).Children(func() {
+			ui.Text(c, "History could not load: "+p.historyErr).TextColor(theme.Coral)
+			if ui.Button(c, "Reload history").Clicked() {
+				p.loadHistory()
 			}
 		})
 	}

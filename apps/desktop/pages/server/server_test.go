@@ -235,3 +235,36 @@ func TestResultsAfterLeavingUpdateOnlyTheStore(t *testing.T) {
 		t.Fatalf("a renewal after leaving set %q", g.p.planMsg)
 	}
 }
+
+func TestShrinkingTheRangeDropsOlderSamples(t *testing.T) {
+	g := newRig(t)
+	g.b.SetHistory("srv-1", monitoring.Sample{Time: now.Add(-3 * 24 * time.Hour), CPU: 66})
+	g.open()
+	g.click("7d")
+	g.flush()
+	g.want("CPU 66%")
+	g.click("1h")
+	g.flush()
+	g.want("No samples yet")
+	if g.tt.HasText("CPU 66%") {
+		t.Fatal("1h shows a sample three days old")
+	}
+}
+
+func TestHistoryErrorOffersReload(t *testing.T) {
+	g := newRig(t)
+	g.b.FailHistory("srv-1", errors.New("ssh: handshake failed"))
+	g.open()
+	g.want("History could not load: ssh: handshake failed")
+	if g.tt.HasText("Live updates stopped") {
+		t.Fatal("a history error shows as a stream error")
+	}
+	g.b.FailHistory("srv-1", nil)
+	g.b.SetHistory("srv-1", monitoring.Sample{Time: now.Add(-time.Minute), CPU: 31})
+	g.click("Reload history")
+	g.flush()
+	g.want("CPU 31%")
+	if g.tt.HasText("History could not load") {
+		t.Fatal("the error stays after reloading")
+	}
+}
