@@ -15,9 +15,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bubbleptr/vpsgogo/apps/desktop/services"
+	"github.com/bubbleptr/vpsgogo/packages/core/agentconfig"
 	"github.com/bubbleptr/vpsgogo/packages/core/fleet"
 	"github.com/bubbleptr/vpsgogo/packages/core/monitoring"
 	"github.com/bubbleptr/vpsgogo/packages/core/notify"
@@ -123,12 +126,13 @@ func TestProvisionFreshVPS(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbDir := t.TempDir()
-	repo, err := fleet.OpenSQLite(ctx, filepath.Join(dbDir, "fleet.db"))
+	repo, err := fleet.OpenSQLite(ctx, filepath.Join(dbDir, services.DBName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	fl := fleet.NewService(repo, vault.NewMemory())
+	secrets := vault.NewMemory()
+	fl := fleet.NewService(repo, secrets)
 	srv, err := fl.Add(ctx, fleet.NewServer{Host: "127.0.0.1", Port: port, Provider: "lima"}, fp)
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +150,7 @@ func TestProvisionFreshVPS(t *testing.T) {
 	}}})
 	rules := monitoring.DefaultRules()
 	rules.Units = []string{"vpsgogo-e2e-missing.service", "ssh.service"}
-	agentJSON, _ := json.Marshal(map[string]any{"name": "lima-vps", "rules": rules})
+	agentJSON, _ := json.Marshal(agentconfig.Config{Name: "lima-vps", Rules: rules})
 	agentBin := buildAgent(t)
 	install := &provisioning.AgentInstall{Binary: agentBin, Config: agentJSON, Notify: notifyJSON}
 
@@ -346,7 +350,7 @@ func TestProvisionFreshVPS(t *testing.T) {
 		}
 	})
 
-	// Last: syncing a new agent.json restarts the agent, which would make the
+	// Late: syncing a new agent.json restarts the agent, which would make the
 	// rerun above see a change.
 	t.Run("renewal reminder", func(t *testing.T) {
 		// The plan expires tomorrow by the VM's clock, in UTC, which the
@@ -356,7 +360,8 @@ func TestProvisionFreshVPS(t *testing.T) {
 			t.Fatal(err)
 		}
 		sub := renewal.Subscription{ServerID: srv.ID, ExpiresAt: today.AddDays(1), Cycle: renewal.Monthly, Price: "4.50", Currency: "USD", RenewURL: "https://example.com/billing"}
-		cfg, _ := json.Marshal(map[string]any{"name": "lima-vps", "rules": rules, "renewal": sub, "timezone": "UTC", "remindHour": 0})
+		midnight := 0
+		cfg, _ := json.Marshal(agentconfig.Config{Name: "lima-vps", Rules: rules, Renewal: &sub, Timezone: "UTC", RemindHour: &midnight})
 		p := &provisioning.Provisioner{Fleet: fl, Log: &log}
 		changed, err := p.SyncAgentConfig(ctx, srv.ID, cfg)
 		if err != nil || !changed {
@@ -386,6 +391,63 @@ func TestProvisionFreshVPS(t *testing.T) {
 		}
 		if changed, err := p.SyncAgentConfig(ctx, srv.ID, cfg); err != nil || changed {
 			t.Errorf("syncing the same config again: changed=%v err=%v", changed, err)
+		}
+	})
+
+	// Last: the app's own sync rewrites agent.json with its name and rules,
+	// which the subtests above do not expect.
+	t.Run("live backend", func(t *testing.T) {
+		l, err := services.OpenLive(ctx, services.LiveOptions{DataDir: dbDir, Vault: secrets, AgentBinary: agentBin})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer l.Close()
+
+		// What the wizard runs, on a server already set up: it logs in as
+		// gogo, and every step reports.
+		var steps []provisioning.StepResult
+		if err := l.Provision(ctx, srv.ID, "", func(r provisioning.StepResult) { steps = append(steps, r) }); err != nil {
+			t.Fatalf("Provision again: %v\n%s", err, mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+		if len(steps) == 0 {
+			t.Error("Provision reported no steps")
+		}
+
+		// An hour back, in case the VM's clock is not quite this machine's.
+		samples, err := l.History(ctx, srv.ID, time.Now().Add(-time.Hour))
+		if err != nil || len(samples) == 0 {
+			t.Fatalf("History: %d samples, %v", len(samples), err)
+		}
+
+		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		var streamed atomic.Int32
+		err = l.Stream(sctx, srv.ID, func(monitoring.Sample) {
+			if streamed.Add(1) == 1 {
+				cancel()
+			}
+		})
+		if err != nil || streamed.Load() == 0 {
+			t.Fatalf("Stream: %d samples in 30s, %v", streamed.Load(), err)
+		}
+
+		today, err := renewal.ParseDate(mustVM(t, "date -u +%F"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := renewal.Subscription{ServerID: srv.ID, ExpiresAt: today.AddDays(400), Cycle: renewal.Yearly, Price: "60", Currency: "EUR"}
+		if err := l.SavePlan(ctx, plan); err != nil {
+			t.Fatalf("SavePlan: %v\n%s", err, mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+		got, err := agentconfig.Parse([]byte(mustVM(t, "cat /etc/gogo-agent/agent.json")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Renewal == nil || got.Renewal.ExpiresAt != plan.ExpiresAt || got.Renewal.Price != "60" || got.Name != srv.Name {
+			t.Errorf("agent.json after SavePlan: %+v renewal %+v", got, got.Renewal)
+		}
+		if out, _ := vmShell(t, "systemctl is-active gogo-agent"); out != "active" {
+			t.Errorf("gogo-agent is %q after the sync", out)
 		}
 	})
 }

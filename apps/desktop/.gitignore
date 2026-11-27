@@ -1,4 +1,5 @@
 /build/
 /.mygo/
 mygo_windows_*.syso
-/embed/agent/
+/embed/agent/*
+!/embed/agent/placeholder.txt

@@ -17,6 +17,7 @@ func TestParseSince(t *testing.T) {
 		{"0", time.Time{}, true}, // everything
 		{"1764244800", time.Unix(1764244800, 0), true},
 		{"2026-11-27T11:00:00Z", now.Add(-time.Hour), true},
+		{"2026-11-27T11:00:00.25Z", now.Add(-time.Hour + 250*time.Millisecond), true}, // the desktop sends the last sample's time
 		{"10m", now.Add(-10 * time.Minute), true},
 		{"-10m", time.Time{}, false}, // the future is no "since"
 		{"yesterday", time.Time{}, false},

@@ -106,22 +106,27 @@ func dialConn(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.Cli
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(cfg.Timeout)
-	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
-		deadline = dl
-	}
-	nc.SetDeadline(deadline)
+	// The handshake gives up after cfg.Timeout, or as soon as ctx ends.
+	nc.SetDeadline(time.Now().Add(cfg.Timeout))
+	stop := context.AfterFunc(ctx, func() { nc.Close() })
 	c, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
+	if !stop() && err == nil {
+		err = ctx.Err() // ctx ended just as the handshake finished
+	}
 	if err != nil {
 		nc.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 	nc.SetDeadline(time.Time{})
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
-// Exec runs cmd and waits for it. When ctx ends first, the session is closed
-// and ctx's error returned.
+// Exec runs cmd and waits for it. When ctx ends first, at whatever step,
+// ctx's error is returned and the connection is closed: a peer that went
+// silent would otherwise hold the call forever. The Client is then unusable.
 func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
 	return c.ExecInput(ctx, cmd, nil)
 }
@@ -130,9 +135,10 @@ func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
 // secret for a command line, such as a binary or a file holding tokens.
 // A nil in gives the command an empty stdin.
 func (c *Client) ExecInput(ctx context.Context, cmd string, in io.Reader) (ExecResult, error) {
+	defer context.AfterFunc(ctx, func() { c.conn.Close() })()
 	sess, err := c.conn.NewSession()
 	if err != nil {
-		return ExecResult{}, fmt.Errorf("sshx: new session: %w", err)
+		return ExecResult{}, ctxErr(ctx, fmt.Errorf("sshx: new session: %w", err))
 	}
 	defer sess.Close()
 
@@ -141,14 +147,14 @@ func (c *Client) ExecInput(ctx context.Context, cmd string, in io.Reader) (ExecR
 	sess.Stdout = &stdout
 	sess.Stderr = &stderr
 	if err := sess.Start(cmd); err != nil {
-		return ExecResult{}, fmt.Errorf("sshx: start: %w", err)
+		return ExecResult{}, ctxErr(ctx, fmt.Errorf("sshx: start: %w", err))
 	}
 	done := make(chan error, 1)
 	go func() { done <- sess.Wait() }()
 
 	select {
 	case <-ctx.Done():
-		sess.Close()
+		c.conn.Close()
 		return ExecResult{}, ctx.Err()
 	case err := <-done:
 		res := ExecResult{Stdout: stdout.String(), Stderr: stderr.String()}
@@ -162,6 +168,58 @@ func (c *Client) ExecInput(ctx context.Context, cmd string, in io.Reader) (ExecR
 		}
 		return res, nil
 	}
+}
+
+// ExecStream runs a long-lived cmd, such as one that follows a log, writing
+// its stdout to stdout as it arrives. It returns when the command exits
+// (nil for exit 0; otherwise an error with its stderr) or when ctx ends,
+// returning ctx's error and closing the connection, as Exec does. stdout is
+// not written to after ExecStream returns.
+func (c *Client) ExecStream(ctx context.Context, cmd string, stdout io.Writer) error {
+	defer context.AfterFunc(ctx, func() { c.conn.Close() })()
+	sess, err := c.conn.NewSession()
+	if err != nil {
+		return ctxErr(ctx, fmt.Errorf("sshx: new session: %w", err))
+	}
+	defer sess.Close()
+
+	var stderr bytes.Buffer
+	sess.Stdout = stdout
+	sess.Stderr = &stderr
+	if err := sess.Start(cmd); err != nil {
+		return ctxErr(ctx, fmt.Errorf("sshx: start: %w", err))
+	}
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+
+	select {
+	case <-ctx.Done():
+		c.conn.Close()
+		<-done // the copy into stdout has stopped
+		return ctx.Err()
+	case err := <-done:
+		var exit *ssh.ExitError
+		switch {
+		case err == nil:
+			return nil
+		case errors.As(err, &exit):
+			msg := strings.TrimSpace(stderr.String())
+			if len(msg) > 500 {
+				msg = msg[len(msg)-500:]
+			}
+			return fmt.Errorf("sshx: %q exited %d: %s", cmd, exit.ExitStatus(), msg)
+		default:
+			return fmt.Errorf("sshx: %q: %w", cmd, err)
+		}
+	}
+}
+
+// ctxErr is ctx's error when ctx ended, which is then why err happened.
+func ctxErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 // Close closes the connection.

@@ -250,3 +250,62 @@ func TestSyncAgentConfigNeedsAnInstalledAgent(t *testing.T) {
 		t.Fatal("synced to a server without gogo-agent")
 	}
 }
+
+func TestSyncAgentNotifyRestartsOnlyOnChange(t *testing.T) {
+	h := newFakeAgentHost()
+	ctx := context.Background()
+	if _, err := ensureAgent(ctx, h, testInstall(), healthy); err != nil {
+		t.Fatal(err)
+	}
+	h.systemctl = nil
+	checked := 0
+	counted := func(context.Context) error { checked++; return nil }
+
+	changed, err := syncAgentNotify(ctx, h, testInstall().Notify, counted)
+	if err != nil || changed || len(h.systemctl) != 0 {
+		t.Fatalf("same channels: changed=%v err=%v systemctl=%v", changed, err, h.systemctl)
+	}
+	next := []byte(`{"channels":[{"type":"ntfy","url":"https://ntfy.sh/x"}]}`)
+	changed, err = syncAgentNotify(ctx, h, next, counted)
+	if err != nil || !changed {
+		t.Fatalf("new channels: changed=%v err=%v", changed, err)
+	}
+	if string(h.blobs[agentNotifyPath]) != string(next) || h.modes[agentNotifyPath] != "0640 root:gogo-agent" {
+		t.Errorf("notify.json %q %q", h.blobs[agentNotifyPath], h.modes[agentNotifyPath])
+	}
+	if strings.Join(h.systemctl, ";") != "restart gogo-agent" {
+		t.Errorf("systemctl %v", h.systemctl)
+	}
+	if checked != 2 {
+		t.Errorf("health checked %d times, want after every sync", checked)
+	}
+}
+
+func TestSyncAgentNotifyNilRemovesTheChannels(t *testing.T) {
+	h := newFakeAgentHost()
+	ctx := context.Background()
+	if _, err := ensureAgent(ctx, h, testInstall(), healthy); err != nil {
+		t.Fatal(err)
+	}
+	h.systemctl = nil
+	changed, err := syncAgentNotify(ctx, h, nil, healthy)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	if _, ok := h.blobs[agentNotifyPath]; ok {
+		t.Error("notify.json is still there")
+	}
+	if strings.Join(h.systemctl, ";") != "restart gogo-agent" {
+		t.Errorf("systemctl %v", h.systemctl)
+	}
+	if changed, err := syncAgentNotify(ctx, h, nil, healthy); err != nil || changed {
+		t.Errorf("removing again: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestSyncAgentNotifyNeedsAnInstalledAgent(t *testing.T) {
+	h := newFakeAgentHost()
+	if _, err := syncAgentNotify(context.Background(), h, []byte(`{}`), healthy); err == nil {
+		t.Fatal("synced to a server without gogo-agent")
+	}
+}

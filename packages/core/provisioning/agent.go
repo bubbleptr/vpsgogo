@@ -113,16 +113,7 @@ func ensureAgent(ctx context.Context, h agentHost, in AgentInstall, healthy func
 	} else {
 		restart = restart || c
 	}
-	if in.Notify == nil {
-		if _, exists, err := h.FileSHA256(ctx, agentNotifyPath); err != nil {
-			return false, err
-		} else if exists {
-			if err := h.RemoveFile(ctx, agentNotifyPath); err != nil {
-				return false, err
-			}
-			restart = true
-		}
-	} else if c, err := ensureBlob(ctx, h, agentNotifyPath, "0640", "root:"+agentUser, in.Notify); err != nil {
+	if c, err := ensureNotify(ctx, h, in.Notify); err != nil {
 		return false, err
 	} else {
 		restart = restart || c
@@ -155,12 +146,25 @@ func ensureAgent(ctx context.Context, h agentHost, in AgentInstall, healthy func
 // installed, restarts the agent if the file changed, and checks it answers:
 // a config the agent rejects shows up here, not as a silent crash loop.
 func syncAgentConfig(ctx context.Context, h agentHost, config []byte, healthy func(context.Context) error) (bool, error) {
+	return syncAgentFile(ctx, h, healthy, func() (bool, error) {
+		return ensureBlob(ctx, h, agentConfigPath, "0644", "root:root", config)
+	})
+}
+
+// syncAgentNotify is syncAgentConfig for notify.json; nil removes it.
+func syncAgentNotify(ctx context.Context, h agentHost, notify []byte, healthy func(context.Context) error) (bool, error) {
+	return syncAgentFile(ctx, h, healthy, func() (bool, error) { return ensureNotify(ctx, h, notify) })
+}
+
+// syncAgentFile runs write on a server where the agent is installed,
+// restarts the agent if write changed a file, and checks it answers.
+func syncAgentFile(ctx context.Context, h agentHost, healthy func(context.Context) error, write func() (bool, error)) (bool, error) {
 	if _, exists, err := h.FileSHA256(ctx, agentBinPath); err != nil {
 		return false, err
 	} else if !exists {
 		return false, errors.New("provisioning: gogo-agent is not installed; provision the server first")
 	}
-	changed, err := ensureBlob(ctx, h, agentConfigPath, "0644", "root:root", config)
+	changed, err := write()
 	if err != nil {
 		return false, err
 	}
@@ -173,6 +177,19 @@ func syncAgentConfig(ctx context.Context, h agentHost, config []byte, healthy fu
 		return changed, fmt.Errorf("provisioning: gogo-agent is not answering: %w", err)
 	}
 	return changed, nil
+}
+
+// ensureNotify writes notify.json, readable by the agent only, or removes
+// it when notify is nil.
+func ensureNotify(ctx context.Context, h agentHost, notify []byte) (bool, error) {
+	if notify != nil {
+		return ensureBlob(ctx, h, agentNotifyPath, "0640", "root:"+agentUser, notify)
+	}
+	_, exists, err := h.FileSHA256(ctx, agentNotifyPath)
+	if err != nil || !exists {
+		return false, err
+	}
+	return true, h.RemoveFile(ctx, agentNotifyPath)
 }
 
 // ensureBlob uploads data to path unless the file there already has its hash.
