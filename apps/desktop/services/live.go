@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -196,17 +197,17 @@ type sampleWriter struct {
 func (w *sampleWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for w.err == nil {
-		i := strings.IndexByte(string(w.buf), '\n')
+		i := bytes.IndexByte(w.buf, '\n')
 		if i < 0 {
 			break
 		}
-		line := strings.TrimSpace(string(w.buf[:i]))
+		line := bytes.TrimSpace(w.buf[:i])
 		w.buf = w.buf[i+1:]
-		if line == "" {
+		if len(line) == 0 {
 			continue
 		}
 		var s monitoring.Sample
-		if err := json.Unmarshal([]byte(line), &s); err != nil {
+		if err := json.Unmarshal(line, &s); err != nil {
 			w.err = fmt.Errorf("services: gogo-agent stream: %w", err)
 			w.stop()
 			break
