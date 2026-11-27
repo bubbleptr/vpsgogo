@@ -1,5 +1,6 @@
 // Command gogo-agent runs on the VPS: it collects metrics and sends alerts
-// while the desktop app is closed. See docs/SPEC.md §4.2.
+// and renewal reminders while the desktop app is closed. See docs/SPEC.md
+// §4.2 and §4.3.
 //
 //	gogo-agent run                     the daemon (systemd runs it)
 //	gogo-agent query --since 10m --json  samples after a time, for the desktop app
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	_ "time/tzdata" // reminders follow the user's time zone; servers may lack tzdata
 
 	"github.com/bubbleptr/vpsgogo/apps/agent/internal/agent"
 	"github.com/bubbleptr/vpsgogo/packages/core/monitoring"
@@ -32,6 +34,7 @@ const (
 	configPath = "/etc/gogo-agent/agent.json"
 	notifyPath = "/etc/gogo-agent/notify.json"
 	statePath  = "/var/lib/gogo-agent/samples.json"
+	sentPath   = "/var/lib/gogo-agent/renewal.json"
 	socketPath = "/run/gogo-agent/agent.sock"
 	interval   = 10 * time.Second
 )
@@ -75,6 +78,10 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	loc, err := cfg.Location()
+	if err != nil {
+		return err
+	}
 	collector := &monitoring.Collector{}
 	o := agent.Options{
 		Name:       cfg.Name,
@@ -87,11 +94,16 @@ func run(ctx context.Context) error {
 		SocketPath: socketPath,
 		StatePath:  statePath,
 		Log:        log.New(os.Stderr, "", 0),
+
+		Renewal:          cfg.Renewal,
+		Location:         loc,
+		RemindHour:       cfg.RemindHourOr9(),
+		RenewalStatePath: sentPath,
 	}
 	if cfg.Heartbeat != "" {
 		o.Heartbeat = func(ctx context.Context) error { return agent.HTTPSProbe(ctx, cfg.Heartbeat) }
 	}
-	log.Printf("gogo-agent %s: %d notify channels, %d units, %d probes", version, len(chans), len(cfg.Rules.Units), len(cfg.Rules.Probes))
+	log.Printf("gogo-agent %s: %d notify channels, %d units, %d probes, renewal %v", version, len(chans), len(cfg.Rules.Units), len(cfg.Rules.Probes), cfg.Renewal != nil)
 	return agent.Run(ctx, o)
 }
 

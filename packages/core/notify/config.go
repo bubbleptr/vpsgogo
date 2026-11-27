@@ -127,7 +127,7 @@ func tlsConfig(ca string) (*tls.Config, error) {
 }
 
 // SendAll sends m to every channel, continuing past failures. It returns the
-// failures joined, each wrapped with its channel's Name.
+// failures joined; Delivered tells whether any channel got m all the same.
 func SendAll(ctx context.Context, chans []Channel, m Message) error {
 	var errs []error
 	for _, ch := range chans {
@@ -135,7 +135,26 @@ func SendAll(ctx context.Context, chans []Channel, m Message) error {
 			errs = append(errs, fmt.Errorf("%s: %w", ch.Name(), err))
 		}
 	}
-	return errors.Join(errs...)
+	if len(errs) == 0 {
+		return nil
+	}
+	err := errors.Join(errs...)
+	if len(errs) < len(chans) {
+		return partialError{err}
+	}
+	return err
+}
+
+// partialError is SendAll's error when some channels delivered.
+type partialError struct{ error }
+
+func (e partialError) Unwrap() error { return e.error }
+
+// Delivered reports whether a send that returned err reached at least one
+// channel: a notice that did should not be sent again because another
+// channel is down.
+func Delivered(err error) bool {
+	return err == nil || errors.As(err, new(partialError))
 }
 
 // oneLine replaces CR and LF with spaces so a value is safe in a header.

@@ -20,6 +20,7 @@ import (
 
 	"github.com/bubbleptr/vpsgogo/packages/core/monitoring"
 	"github.com/bubbleptr/vpsgogo/packages/core/notify"
+	"github.com/bubbleptr/vpsgogo/packages/core/renewal"
 )
 
 // Options configures Run. Every function is a probe of the machine, so tests
@@ -43,11 +44,20 @@ type Options struct {
 	StatePath  string        // where samples are kept across restarts
 	SaveEvery  time.Duration // default 5m; samples are also saved on stop
 
-	Log *log.Logger // default: stderr, which systemd sends to the journal
+	// Renewal, when set, is the server's plan: a reminder goes out on each
+	// remind day once it is RemindHour o'clock in Location (default UTC).
+	// RenewalStatePath keeps what was sent across restarts.
+	Renewal          *renewal.Subscription
+	Location         *time.Location
+	RemindHour       int
+	RenewalEvery     time.Duration // how often to check; default 1h
+	RenewalStatePath string
+
+	Now func() time.Time // default time.Now
+	Log *log.Logger      // default: stderr, which systemd sends to the journal
 }
 
-// Run serves until ctx ends, then saves the samples and returns.
-func Run(ctx context.Context, o Options) error {
+func (o *Options) defaults() {
 	if o.Log == nil {
 		o.Log = log.New(os.Stderr, "", 0)
 	}
@@ -57,6 +67,20 @@ func Run(ctx context.Context, o Options) error {
 	if o.HeartbeatEvery == 0 {
 		o.HeartbeatEvery = time.Minute
 	}
+	if o.RenewalEvery == 0 {
+		o.RenewalEvery = time.Hour
+	}
+	if o.Location == nil {
+		o.Location = time.UTC
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+}
+
+// Run serves until ctx ends, then saves the samples and returns.
+func Run(ctx context.Context, o Options) error {
+	o.defaults()
 	store := monitoring.NewStore()
 	if f, err := os.Open(o.StatePath); err == nil {
 		if err := store.Load(f); err != nil {
@@ -76,6 +100,10 @@ func Run(ctx context.Context, o Options) error {
 	if o.Heartbeat != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); heartbeat(ctx, o) }()
+	}
+	if o.Renewal != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); newRenewals(o).run(ctx) }()
 	}
 
 	// Checks and notices run apart from sampling: a hanging probe or a slow
@@ -177,14 +205,20 @@ func heartbeat(ctx context.Context, o Options) {
 	}
 }
 
-// save writes the samples atomically: a crash never leaves a torn file.
+// save writes the samples atomically.
 func save(store *monitoring.Store, path string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".samples-*")
+	return writeAtomic(path, store.Save)
+}
+
+// writeAtomic writes a file through a temporary one: a crash never leaves a
+// torn file.
+func writeAtomic(path string, write func(io.Writer) error) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if err := store.Save(tmp); err != nil {
+	if err := write(tmp); err != nil {
 		tmp.Close()
 		return err
 	}

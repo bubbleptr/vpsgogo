@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,6 +24,20 @@ func TestParseSince(t *testing.T) {
 		got, err := parseSince(tc.in, now)
 		if (err == nil) != tc.ok || (tc.ok && !got.Equal(tc.want)) {
 			t.Errorf("parseSince(%q) = %v, %v; want %v ok=%v", tc.in, got, err, tc.want, tc.ok)
+		}
+	}
+}
+
+// The agent shares packages/core's pure logic only: the desktop's storage
+// and UI (mygo, SQLite) would bloat a binary uploaded to every server.
+func TestAgentLinksNoDesktopCode(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", ".").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dep := range strings.Fields(string(out)) {
+		if strings.HasPrefix(dep, "github.com/egoist/mygo") {
+			t.Errorf("gogo-agent depends on %s", dep)
 		}
 	}
 }
