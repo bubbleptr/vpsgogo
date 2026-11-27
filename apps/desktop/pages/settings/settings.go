@@ -188,6 +188,8 @@ func fields(c *ui.Context, ch *channel, n string) {
 		plain("From address", &ch.cfg.From)
 		plain("To addresses", &ch.to)
 	}
+	ui.Field(c, "Private CA (PEM)"+n, func() { ui.TextArea(c, &ch.cfg.CA) }).
+		Description("Only for a self-hosted endpoint whose certificate your own CA signed.")
 }
 
 func (p *Page) test(ch *channel) {

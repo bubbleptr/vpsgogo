@@ -191,3 +191,15 @@ func TestUnknownTimezone(t *testing.T) {
 		t.Fatal("saved an unknown timezone")
 	}
 }
+
+func TestPrivateCAIsChecked(t *testing.T) {
+	g := newRig(t, services.Settings{})
+	g.click("Add channel")
+	g.typeInto("Webhook URL", hookURL)
+	g.typeInto("Private CA (PEM)", "not a certificate")
+	g.click("Save")
+	g.want("ca contains no PEM certificate")
+	if g.r.Pending() != 0 {
+		t.Fatal("saved a CA that is not PEM")
+	}
+}
