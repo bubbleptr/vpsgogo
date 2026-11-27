@@ -150,7 +150,7 @@ func (a *App) openServer(id string) {
 // View builds the window's content.
 func (a *App) View(c *ui.Context) {
 	pal := theme.For(c)
-	theme.Canvas(ui.Row(c).Fill(), pal).Children(func() {
+	theme.Canvas(ui.Row(c).Fill().AlignItems(ui.Stretch), pal).Children(func() {
 		ui.Column(c).Width(180).Padding(24, 16).Gap(8).Background(pal.Cream).Children(func() {
 			a.navButton(c, "Dashboard", routeDashboard)
 			a.navButton(c, "Renewals", routeRenewals)
