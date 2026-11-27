@@ -57,13 +57,21 @@ m4() {
   step go test -tags vm -count=1 -v -timeout 40m ./test/e2e/...
 }
 
+m5a() {
+  step go vet ./apps/desktop/... ./packages/core/renewal/...
+  # ui.Tester walks the add-server wizard and every page over a fake backend.
+  step go test -race -count=1 -v ./apps/desktop/...
+  step go test -race -count=1 ./packages/core/renewal/...
+}
+
 case "${1:-}" in
   M0) m0 ;;
   M1) m1 ;;
   M2) m2 ;;
   M3) m3 ;;
   M4) m4 ;;
-  *) echo "usage: $0 M0|M1|M2|M3|M4   (later milestones are added as they are built)" >&2; exit 2 ;;
+  M5a) m5a ;;
+  *) echo "usage: $0 M0|M1|M2|M3|M4|M5a   (later milestones are added as they are built)" >&2; exit 2 ;;
 esac
 
 echo
