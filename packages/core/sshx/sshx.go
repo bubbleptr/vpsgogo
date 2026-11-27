@@ -106,11 +106,8 @@ func dialConn(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.Cli
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(cfg.Timeout)
-	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
-		deadline = dl
-	}
-	nc.SetDeadline(deadline)
+	// The handshake gives up after cfg.Timeout, or as soon as ctx ends.
+	nc.SetDeadline(time.Now().Add(cfg.Timeout))
 	stop := context.AfterFunc(ctx, func() { nc.Close() })
 	c, chans, reqs, err := ssh.NewClientConn(nc, addr, cfg)
 	if !stop() && err == nil {
