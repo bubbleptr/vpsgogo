@@ -66,16 +66,23 @@ type Page struct {
 	newType  string
 	msg      string
 	err      string
-	busy     bool
+	busy     bool // a save is in flight
+	// gen counts drafts: a save's result shows only on the draft it saved.
+	gen int
 }
 
 // New returns the page; Open fills it from the store.
 func New(o Options) *Page { return &Page{o: o, newType: Types[0]} }
 
 // Open starts a draft of the stored settings.
+// While a save is in flight it keeps the draft being saved, which the
+// store does not hold yet.
 func (p *Page) Open() {
+	if p.busy {
+		return
+	}
 	s := p.o.Store.Settings
-	*p = Page{o: p.o, newType: Types[0], timezone: s.Timezone, hour: float64(s.RemindHour), key: s.AnthropicKey}
+	*p = Page{o: p.o, gen: p.gen + 1, newType: Types[0], timezone: s.Timezone, hour: float64(s.RemindHour), key: s.AnthropicKey}
 	for _, cfg := range s.Channels {
 		ch := &channel{cfg: cfg, port: float64(cfg.Port), to: strings.Join(cfg.To, ", ")}
 		if cfg.Type == "smtp" && cfg.Port == 0 {
@@ -247,15 +254,21 @@ func (p *Page) save() {
 		return
 	}
 	p.busy = true
+	gen := p.gen
 	p.o.Runner.Go(func(post func(func())) {
 		err := p.o.Backend.SaveSettings(context.Background(), s)
 		post(func() {
+			if err == nil {
+				p.o.Store.Settings = s
+			}
+			if gen != p.gen {
+				return
+			}
 			p.busy = false
 			if err != nil {
 				p.err = err.Error()
 				return
 			}
-			p.o.Store.Settings = s
 			p.msg = "Settings saved"
 		})
 	})

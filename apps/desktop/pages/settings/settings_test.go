@@ -203,3 +203,27 @@ func TestPrivateCAIsChecked(t *testing.T) {
 		t.Fatal("saved a CA that is not PEM")
 	}
 }
+
+func TestReopeningMidSaveKeepsTheDraft(t *testing.T) {
+	g := newRig(t, services.Settings{RemindHour: 9})
+	g.typeInto("Timezone", "Asia/Tokyo")
+	g.click("Save")
+	g.p.Open() // the user left and came back before the save finished
+	g.tt.Frame()
+	if a, _ := g.tt.AccessByRole(ui.RoleTextField, "Timezone"); a.Value != "Asia/Tokyo" {
+		t.Fatalf("the draft was rebuilt mid-save: timezone %q", a.Value)
+	}
+	if a, _ := g.tt.AccessByRole(ui.RoleButton, "Save"); !a.Disabled {
+		t.Fatal("Save is enabled while a save is in flight")
+	}
+	g.flush()
+	g.want("Settings saved")
+	if g.s.Settings.Timezone != "Asia/Tokyo" {
+		t.Fatalf("the store has %q", g.s.Settings.Timezone)
+	}
+	g.p.Open()
+	g.tt.Frame()
+	if a, _ := g.tt.AccessByRole(ui.RoleTextField, "Timezone"); a.Value != "Asia/Tokyo" {
+		t.Fatalf("after the save, the draft has %q", a.Value)
+	}
+}
