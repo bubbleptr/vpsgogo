@@ -71,7 +71,7 @@ vpsgogo/
       services/         # 适配层：调 core 与平台（钥匙串等），无业务逻辑
       pages/ widgets/ features/ entities/ shared/
                         # FSD 各层即 Go 包，依赖只能自上而下；只建有代码的包
-                        # （现有 pages/dashboard、shared/theme）
+                        # （现有 app、pages/{dashboard,addserver,server,renewals,settings}、features/planform、entities/{store,plan}、shared/{theme,async,format}；services/fake 为测试用假服务层）
       mygo.json
       resources/
     agent/              # gogo-agent，cmd + internal
