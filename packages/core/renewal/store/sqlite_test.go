@@ -1,4 +1,4 @@
-package renewal
+package store
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/bubbleptr/vpsgogo/packages/core/fleet"
+	"github.com/bubbleptr/vpsgogo/packages/core/renewal"
 )
 
 func TestSQLiteKeepsSubscriptionsBesideTheFleet(t *testing.T) {
@@ -26,11 +27,11 @@ func TestSQLiteKeepsSubscriptionsBesideTheFleet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sub := Subscription{ServerID: "s1", ExpiresAt: d("2027-01-31"), Cycle: Monthly, Price: "5.00", Currency: "USD", RemindDays: []int{5, 0}}
+	sub := renewal.Subscription{ServerID: "s1", ExpiresAt: d("2027-01-31"), Cycle: renewal.Monthly, Price: "5.00", Currency: "USD", RemindDays: []int{5, 0}}
 	if err := db.Put(ctx, sub); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Put(ctx, Subscription{ServerID: "s2", Cycle: Monthly}); err == nil {
+	if err := db.Put(ctx, renewal.Subscription{ServerID: "s2", Cycle: renewal.Monthly}); err == nil {
 		t.Error("stored a plan with no expiry")
 	}
 	got, err := db.Renew(ctx, "s1")
@@ -63,4 +64,12 @@ func TestSQLiteKeepsSubscriptionsBesideTheFleet(t *testing.T) {
 	if _, err := db.Renew(ctx, "s1"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Renew after Delete: %v", err)
 	}
+}
+
+func d(s string) renewal.Date {
+	v, err := renewal.ParseDate(s)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

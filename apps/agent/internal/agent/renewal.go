@@ -44,8 +44,8 @@ func (r *renewals) run(ctx context.Context) {
 }
 
 // check sends today's reminder if one is due and it is past the remind hour
-// where the user lives. A reminder that fails to send is tried again at the
-// next check.
+// where the user lives. A reminder no channel delivered is tried again at
+// the next check.
 func (r *renewals) check(ctx context.Context, now time.Time) {
 	local := now.In(r.o.Location)
 	if local.Hour() < r.o.RemindHour {
@@ -61,7 +61,9 @@ func (r *renewals) check(ctx context.Context, now time.Time) {
 	defer cancel()
 	if err := r.o.Notify(ctx, m); err != nil {
 		r.o.Log.Printf("notify: %v", err)
-		return
+		if !notify.Delivered(err) {
+			return
+		}
 	}
 	r.sent.Record(rem)
 	if err := writeAtomic(r.o.RenewalStatePath, func(w io.Writer) error { return json.NewEncoder(w).Encode(r.sent) }); err != nil {

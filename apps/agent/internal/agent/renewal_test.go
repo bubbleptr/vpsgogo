@@ -86,6 +86,30 @@ func TestRenewalRetriesWhenSendingFails(t *testing.T) {
 	}
 }
 
+func TestRenewalCountsAPartlyDeliveredReminderAsSent(t *testing.T) {
+	// One dead channel must not repeat the reminder hourly on the others.
+	r, sent, fail := renewalChecker(t, plan("2026-12-02"), time.UTC)
+	ctx := context.Background()
+	partial := notify.SendAll(ctx, []notify.Channel{okChannel{}, deadChannel{}}, notify.Message{})
+	*fail = partial
+	r.check(ctx, time.Date(2026, 12, 1, 10, 0, 0, 0, time.UTC))
+	*fail = nil
+	r.check(ctx, time.Date(2026, 12, 1, 11, 0, 0, 0, time.UTC))
+	if len(*sent) != 0 {
+		t.Errorf("sent again after a partly delivered reminder: %+v", *sent)
+	}
+}
+
+type okChannel struct{}
+
+func (okChannel) Name() string                               { return "ok" }
+func (okChannel) Send(context.Context, notify.Message) error { return nil }
+
+type deadChannel struct{}
+
+func (deadChannel) Name() string                               { return "dead" }
+func (deadChannel) Send(context.Context, notify.Message) error { return errors.New("revoked token") }
+
 func TestRenewalReminderOnceAcrossRestarts(t *testing.T) {
 	h := newHarness(t)
 	h.opts.Renewal = plan("2026-12-02")

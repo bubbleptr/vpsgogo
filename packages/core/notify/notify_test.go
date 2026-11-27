@@ -300,3 +300,19 @@ func TestSendAllContinuesPastFailures(t *testing.T) {
 		t.Errorf("SendAll with no failures = %v", err)
 	}
 }
+
+func TestSendAllTellsWhetherAnyChannelDelivered(t *testing.T) {
+	boom := errors.New("boom")
+	ok := &fakeChannel{name: "webhook"}
+	bad := &fakeChannel{name: "telegram", err: boom}
+	worse := &fakeChannel{name: "ntfy", err: boom}
+	if err := SendAll(context.Background(), []Channel{ok, bad}, msg); !Delivered(err) {
+		t.Errorf("one of two delivered: Delivered(%v) = false", err)
+	}
+	if err := SendAll(context.Background(), []Channel{bad, worse}, msg); Delivered(err) {
+		t.Errorf("none delivered: Delivered(%v) = true", err)
+	}
+	if !Delivered(nil) {
+		t.Error("Delivered(nil) = false")
+	}
+}

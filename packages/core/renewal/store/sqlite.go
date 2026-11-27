@@ -1,4 +1,6 @@
-package renewal
+// Package store keeps the desktop app's renewal plans in SQLite. It is apart
+// from package renewal so gogo-agent, which uses renewal, links no SQLite.
+package store
 
 import (
 	"context"
@@ -6,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/bubbleptr/vpsgogo/packages/core/renewal"
 	"github.com/egoist/mygo/plugins/sqlite"
 )
 
@@ -40,7 +43,7 @@ func OpenSQLite(ctx context.Context, path string) (*SQLite, error) {
 func (r *SQLite) Close() error { return r.db.Close() }
 
 // Put records s, replacing the server's plan.
-func (r *SQLite) Put(ctx context.Context, s Subscription) error {
+func (r *SQLite) Put(ctx context.Context, s renewal.Subscription) error {
 	if err := s.Validate(); err != nil {
 		return err
 	}
@@ -54,23 +57,23 @@ func (r *SQLite) Put(ctx context.Context, s Subscription) error {
 	return err
 }
 
-func (r *SQLite) Get(ctx context.Context, serverID string) (Subscription, error) {
+func (r *SQLite) Get(ctx context.Context, serverID string) (renewal.Subscription, error) {
 	rows, err := r.db.Query(ctx, `SELECT data FROM subscriptions WHERE server_id = ?`, serverID)
 	if err != nil {
-		return Subscription{}, err
+		return renewal.Subscription{}, err
 	}
 	if len(rows.Values) == 0 {
-		return Subscription{}, ErrNotFound
+		return renewal.Subscription{}, ErrNotFound
 	}
 	return decode(rows.Values[0])
 }
 
-func (r *SQLite) List(ctx context.Context) ([]Subscription, error) {
+func (r *SQLite) List(ctx context.Context) ([]renewal.Subscription, error) {
 	rows, err := r.db.Query(ctx, `SELECT data FROM subscriptions ORDER BY rowid`)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Subscription, 0, len(rows.Values))
+	out := make([]renewal.Subscription, 0, len(rows.Values))
 	for _, v := range rows.Values {
 		s, err := decode(v)
 		if err != nil {
@@ -88,7 +91,7 @@ func (r *SQLite) Delete(ctx context.Context, serverID string) error {
 
 // Renew records that the user paid for one more cycle and returns the plan
 // with its new expiry, which the caller then syncs to the server's agent.
-func (r *SQLite) Renew(ctx context.Context, serverID string) (Subscription, error) {
+func (r *SQLite) Renew(ctx context.Context, serverID string) (renewal.Subscription, error) {
 	s, err := r.Get(ctx, serverID)
 	if err != nil {
 		return s, err
@@ -99,8 +102,8 @@ func (r *SQLite) Renew(ctx context.Context, serverID string) (Subscription, erro
 	return s, r.Put(ctx, s)
 }
 
-func decode(v []any) (Subscription, error) {
-	var s Subscription
+func decode(v []any) (renewal.Subscription, error) {
+	var s renewal.Subscription
 	data, _ := v[0].(string)
 	if err := json.Unmarshal([]byte(data), &s); err != nil {
 		return s, fmt.Errorf("renewal: stored plan: %w", err)
