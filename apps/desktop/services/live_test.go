@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -343,5 +344,48 @@ func provisioned(t *testing.T, l *Live, srv fleet.Server) {
 	}
 	if err := l.fleet.SetUser(context.Background(), srv.ID, provisioning.OpsUser); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A sync builds agent.json from what is stored and uploads it. Two syncs of
+// one server must not overlap: a stalled one would land after a newer one
+// and put an older plan back on the server.
+func TestSyncsOfOneServerDoNotOverlap(t *testing.T) {
+	ctx := context.Background()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var dials atomic.Int32
+	l := openLive(t, t.TempDir(), vault.NewMemory(), func(context.Context, fleet.Server, string, ssh.AuthMethod) (provisioning.Session, error) {
+		if dials.Add(1) == 1 { // the first sync stalls on the network
+			close(entered)
+			<-release
+		}
+		return nil, sshx.ErrHostKeyMismatch // final: no retries
+	})
+	srv := addServer(t, l, "web-1")
+	provisioned(t, l, srv)
+	if err := l.plans.Put(ctx, monthlyPlan(srv.ID)); err != nil {
+		t.Fatal(err)
+	}
+	waiting := make(chan struct{})
+	l.locks.waiting = func(string) { close(waiting) }
+
+	settingsDone := make(chan error, 1)
+	go func() { settingsDone <- l.SaveSettings(ctx, Settings{RemindHour: 8}) }()
+	<-entered
+	renewDone := make(chan error, 1)
+	go func() {
+		_, err := l.Renew(ctx, srv.ID)
+		renewDone <- err
+	}()
+	select {
+	case <-renewDone:
+		t.Fatal("Renew synced while an earlier sync of the server was still uploading")
+	case <-waiting:
+	}
+	close(release)
+	for _, done := range []chan error{settingsDone, renewDone} {
+		if err := <-done; !errors.As(err, new(*SyncError)) {
+			t.Errorf("err = %v, want a SyncError", err)
+		}
 	}
 }

@@ -53,7 +53,41 @@ type Live struct {
 	// systemZone names the computer's time zone; tests replace it.
 	systemZone func() string
 
-	mu sync.Mutex // settings.json
+	mu    sync.Mutex // settings.json
+	locks serverLocks
+}
+
+// serverLocks serializes the syncs of each server, from reading what is
+// stored through the upload: otherwise a stalled sync could land after a
+// newer one and put older settings or an older plan back on the server.
+type serverLocks struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+	// waiting, when set, is told that a sync of server id waits for
+	// another; only tests set it.
+	waiting func(id string)
+}
+
+// lock takes server id's lock and returns its unlock.
+func (s *serverLocks) lock(id string) func() {
+	s.mu.Lock()
+	if s.m == nil {
+		s.m = map[string]*sync.Mutex{}
+	}
+	m := s.m[id]
+	if m == nil {
+		m = &sync.Mutex{}
+		s.m[id] = m
+	}
+	waiting := s.waiting
+	s.mu.Unlock()
+	if !m.TryLock() {
+		if waiting != nil {
+			waiting(id)
+		}
+		m.Lock()
+	}
+	return m.Unlock
 }
 
 var _ Backend = (*Live)(nil)
@@ -106,6 +140,7 @@ func (l *Live) AddServer(ctx context.Context, n fleet.NewServer, fingerprint str
 }
 
 func (l *Live) Provision(ctx context.Context, id, rootPassword string, progress func(provisioning.StepResult)) error {
+	defer l.locks.lock(id)() // it uploads agent.json and notify.json too
 	srv, err := l.fleet.Get(ctx, id)
 	if err != nil {
 		return err
@@ -312,6 +347,7 @@ func (l *Live) sync(ctx context.Context, ids []string, withNotify bool) error {
 }
 
 func (l *Live) syncServer(ctx context.Context, srv fleet.Server, withNotify bool) error {
+	defer l.locks.lock(srv.ID)()
 	p := l.provisioner()
 	if withNotify {
 		n, err := l.notifyConfig()
