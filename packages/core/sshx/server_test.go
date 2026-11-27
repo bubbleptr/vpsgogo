@@ -18,8 +18,8 @@ import (
 )
 
 // testServer is an in-process SSH server that understands a few commands:
-// "echo hi", "fail" (stderr "boom", exit 3) and "block" (waits until the
-// client goes away).
+// "echo hi", "fail" (stderr "boom", exit 3), "block" (waits until the
+// client goes away) and "lines" (writes two lines, then blocks).
 type testServer struct {
 	host    string
 	port    int
@@ -129,6 +129,11 @@ func (s *testServer) serve(conn net.Conn, cfg *ssh.ServerConfig) {
 				case "fail":
 					ch.Stderr().Write([]byte("boom"))
 					code = 3
+				case "lines":
+					ch.Write([]byte("one\ntwo\n"))
+					for range chReqs {
+					}
+					return
 				case "block":
 					for range chReqs { // until the client closes the channel
 					}

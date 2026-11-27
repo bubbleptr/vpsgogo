@@ -164,6 +164,49 @@ func (c *Client) ExecInput(ctx context.Context, cmd string, in io.Reader) (ExecR
 	}
 }
 
+// ExecStream runs a long-lived cmd, such as one that follows a log, writing
+// its stdout to stdout as it arrives. It returns when the command exits
+// (nil for exit 0; otherwise an error with its stderr) or when ctx ends,
+// closing the session and returning ctx's error. stdout is not written to
+// after ExecStream returns.
+func (c *Client) ExecStream(ctx context.Context, cmd string, stdout io.Writer) error {
+	sess, err := c.conn.NewSession()
+	if err != nil {
+		return fmt.Errorf("sshx: new session: %w", err)
+	}
+	defer sess.Close()
+
+	var stderr bytes.Buffer
+	sess.Stdout = stdout
+	sess.Stderr = &stderr
+	if err := sess.Start(cmd); err != nil {
+		return fmt.Errorf("sshx: start: %w", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+
+	select {
+	case <-ctx.Done():
+		sess.Close()
+		<-done // the copy into stdout has stopped
+		return ctx.Err()
+	case err := <-done:
+		var exit *ssh.ExitError
+		switch {
+		case err == nil:
+			return nil
+		case errors.As(err, &exit):
+			msg := strings.TrimSpace(stderr.String())
+			if len(msg) > 500 {
+				msg = msg[len(msg)-500:]
+			}
+			return fmt.Errorf("sshx: %q exited %d: %s", cmd, exit.ExitStatus(), msg)
+		default:
+			return fmt.Errorf("sshx: %q: %w", cmd, err)
+		}
+	}
+}
+
 // Close closes the connection.
 func (c *Client) Close() error { return c.conn.Close() }
 
