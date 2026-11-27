@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -283,5 +284,64 @@ func TestSampleLinesSplitAcrossWrites(t *testing.T) {
 	w.Write([]byte("gogo-agent: not json\n"))
 	if w.err == nil || !stopped {
 		t.Fatalf("bad line: err %v stopped %v", w.err, stopped)
+	}
+}
+
+// The dashboard polls History without a deadline of its own; a server that
+// stops answering must not hold the poll forever.
+func TestHistoryGivesUpOnASilentServer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() { // accepts and never says a word
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	defer func(d time.Duration) { historyTimeout = d }(historyTimeout)
+	historyTimeout = 100 * time.Millisecond
+
+	ctx := context.Background()
+	l := openLive(t, t.TempDir(), vault.NewMemory(), noDial(t))
+	port := ln.Addr().(*net.TCPAddr).Port
+	srv, err := l.AddServer(ctx, fleet.NewServer{Name: "silent", Host: "127.0.0.1", Port: port}, "SHA256:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioned(t, l, srv)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := l.History(ctx, srv.ID, time.Time{})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v, want DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("History is still waiting for a server that never answers")
+	}
+}
+
+// provisioned makes srv look provisioned: gogo logs in with a stored key.
+func provisioned(t *testing.T, l *Live, srv fleet.Server) {
+	t.Helper()
+	key, err := sshx.GenerateKey("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.fleet.SetPrivateKey(srv.ID, key.PrivatePEM); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.fleet.SetUser(context.Background(), srv.ID, provisioning.OpsUser); err != nil {
+		t.Fatal(err)
 	}
 }

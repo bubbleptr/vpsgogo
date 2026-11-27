@@ -135,8 +135,19 @@ func (l *Live) provisioner() *provisioning.Provisioner {
 	return &provisioning.Provisioner{Fleet: l.fleet, Dial: l.dial}
 }
 
-// History runs `gogo-agent query` on the server as gogo.
+// historyTimeout bounds a History call whose ctx has no deadline: the
+// dashboard polls without one, and a silent server would hold it forever.
+// A query answers in well under a second; the rest is room for the login.
+var historyTimeout = 20 * time.Second
+
+// History runs `gogo-agent query` on the server as gogo, giving up after
+// historyTimeout unless ctx has a deadline of its own.
 func (l *Live) History(ctx context.Context, id string, since time.Time) ([]monitoring.Sample, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, historyTimeout)
+		defer cancel()
+	}
 	c, err := l.connect(ctx, id)
 	if err != nil {
 		return nil, err
@@ -170,9 +181,6 @@ func (l *Live) Stream(ctx context.Context, id string, f func(monitoring.Sample))
 	defer c.Close()
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
-	// Closing the connection, not only the session, returns at once even
-	// when the server has silently gone away.
-	defer context.AfterFunc(sctx, func() { c.Close() })()
 	w := &sampleWriter{f: f, stop: stop}
 	err = c.ExecStream(sctx, "gogo-agent stream --json", w)
 	switch {
