@@ -170,3 +170,20 @@ func TestWarnsFromSevenDaysLeft(t *testing.T) {
 		}
 	}
 }
+
+func TestPollHasItsOwnDeadline(t *testing.T) {
+	g := newRig(t, web)
+	start := time.Now()
+	g.flush()
+	for _, c := range g.b.Calls() {
+		if c.Method != "History" {
+			continue
+		}
+		deadline := c.Args[2].(time.Time)
+		if deadline.IsZero() || deadline.Sub(start) > PollTimeout+time.Second {
+			t.Fatalf("poll deadline %v, %v after it started", deadline, deadline.Sub(start))
+		}
+		return
+	}
+	t.Fatal("no poll")
+}

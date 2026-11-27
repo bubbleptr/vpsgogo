@@ -237,11 +237,13 @@ func (b *Backend) RemoveServer(ctx context.Context, id string) error {
 	return nil
 }
 
-// History returns the samples set for id taken after since.
+// History returns the samples set for id taken after since. Its call
+// records the id, since, and ctx's deadline.
 func (b *Backend) History(ctx context.Context, id string, since time.Time) ([]monitoring.Sample, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.record("History", id, since)
+	deadline, _ := ctx.Deadline()
+	b.record("History", id, since, deadline) // zero when ctx has none
 	if err := b.historyErr[id]; err != nil {
 		return nil, err
 	}

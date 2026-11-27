@@ -22,6 +22,9 @@ import (
 const (
 	// PollEvery is how often the page asks each server for its samples.
 	PollEvery = 30 * time.Second
+	// PollTimeout bounds one poll, so a silent server counts as a failure
+	// whatever the backend's own limits.
+	PollTimeout = 15 * time.Second
 	// OfflineAfter is how many polls in a row must fail before a server
 	// shows as offline (docs/SPEC.md §4.2).
 	OfflineAfter = 3
@@ -151,7 +154,9 @@ func (p *Page) start(id string, st *status) {
 	since := p.o.Now().Add(-time.Minute)
 	b := p.o.Backend
 	p.o.Runner.Go(func(post func(func())) {
-		samples, err := b.History(context.Background(), id, since)
+		ctx, cancel := context.WithTimeout(context.Background(), PollTimeout)
+		defer cancel()
+		samples, err := b.History(ctx, id, since)
 		post(func() {
 			st.inFlight = false
 			if err != nil {
