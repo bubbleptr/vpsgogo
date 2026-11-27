@@ -38,14 +38,14 @@ func Summary(s renewal.Subscription) string {
 	return strings.Join(parts, " · ")
 }
 
-// Badge shows Left in the color of s's urgency.
+// Badge shows Left in the color of s's urgency, and says when it is time
+// to renew, so the warning does not rest on color alone.
 func Badge(c *ui.Context, s renewal.Subscription, today renewal.Date) ui.Element {
-	t := ui.Text(c, Left(s, today)).FontWeight(700)
 	switch s.Urgency(today) {
 	case renewal.Overdue:
-		return t.TextColor(theme.Coral)
+		return ui.Text(c, Left(s, today)).FontWeight(700).TextColor(theme.Coral)
 	case renewal.Soon:
-		return t.TextColor(theme.Amber)
+		return ui.Text(c, Left(s, today)+" · renew soon").FontWeight(700).TextColor(theme.Amber)
 	}
-	return t.TextColor(theme.For(c).Ink)
+	return ui.Text(c, Left(s, today)).FontWeight(700).TextColor(theme.For(c).Ink)
 }

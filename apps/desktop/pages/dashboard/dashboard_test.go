@@ -150,3 +150,23 @@ func TestPollsEveryThirtySeconds(t *testing.T) {
 		t.Fatalf("%d polls at 30 s", n)
 	}
 }
+
+func TestWarnsFromSevenDaysLeft(t *testing.T) {
+	for _, c := range []struct {
+		day  int
+		want string
+		warn bool
+	}{
+		{9, "8 days left", false},
+		{8, "7 days left · renew soon", true},
+		{1, "Expires today · renew soon", true},
+	} {
+		g := newRig(t, web)
+		g.s.PutPlan(renewal.Subscription{ServerID: "srv-1", ExpiresAt: renewal.Date{Year: 2026, Month: 12, Day: c.day}, Cycle: renewal.Monthly})
+		g.tt.Frame()
+		g.want(c.want)
+		if got := g.tt.HasText("renew soon"); got != c.warn {
+			t.Errorf("expires Dec %d: warns %v", c.day, got)
+		}
+	}
+}

@@ -51,6 +51,7 @@ type Backend struct {
 	stream     map[string][]monitoring.Sample
 	streamErr  map[string]error
 	provisions int
+	added      int // servers added, for their IDs
 	calls      []Call
 }
 
@@ -177,8 +178,9 @@ func (b *Backend) AddServer(ctx context.Context, n fleet.NewServer, fingerprint 
 	if n.Name == "" {
 		n.Name = n.Host
 	}
+	b.added++
 	s := fleet.Server{
-		ID:   fmt.Sprintf("srv-%d", len(b.servers)+1),
+		ID:   fmt.Sprintf("srv-%d", b.added),
 		Name: n.Name, Host: n.Host, Port: n.Port, Provider: n.Provider,
 		User: "root", HostKeyFP: fingerprint, CreatedAt: time.Unix(0, 0).UTC(),
 	}
