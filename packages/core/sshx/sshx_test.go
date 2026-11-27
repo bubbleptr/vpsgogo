@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -258,5 +259,40 @@ func TestExecStreamReturnsWhenTheCommandExits(t *testing.T) {
 	err = c.ExecStream(context.Background(), "fail", &out)
 	if err == nil || !strings.Contains(err.Error(), "boom") || !strings.Contains(err.Error(), "3") {
 		t.Fatalf("fail: err = %v, want exit 3 with its stderr", err)
+	}
+}
+
+// A peer that stops answering mid-command must not hang a caller whose ctx
+// has ended, whichever step the command was at.
+func TestExecReturnsWhenTheServerNeverAnswers(t *testing.T) {
+	s := newTestServer(t)
+	for name, run := range map[string]func(*Client, context.Context) error{
+		"Exec": func(c *Client, ctx context.Context) error {
+			_, err := c.Exec(ctx, "hang")
+			return err
+		},
+		"ExecStream": func(c *Client, ctx context.Context) error {
+			return c.ExecStream(ctx, "hang", io.Discard)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := dialRoot(t, s, s.fingerprint())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- run(c, ctx) }()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("err = %v, want DeadlineExceeded", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("still waiting for the server after the context ended")
+			}
+		})
 	}
 }

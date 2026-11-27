@@ -19,7 +19,8 @@ import (
 
 // testServer is an in-process SSH server that understands a few commands:
 // "echo hi", "fail" (stderr "boom", exit 3), "block" (waits until the
-// client goes away) and "lines" (writes two lines, then blocks).
+// client goes away), "lines" (writes two lines, then blocks) and "hang"
+// (never answers the exec request, like a peer that went silent).
 type testServer struct {
 	host    string
 	port    int
@@ -117,6 +118,9 @@ func (s *testServer) serve(conn net.Conn, cfg *ssh.ServerConfig) {
 				}
 				var payload struct{ Command string }
 				ssh.Unmarshal(req.Payload, &payload)
+				if payload.Command == "hang" {
+					continue
+				}
 				req.Reply(true, nil)
 				code := 0
 				switch payload.Command {
