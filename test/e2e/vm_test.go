@@ -403,6 +403,16 @@ func TestProvisionFreshVPS(t *testing.T) {
 		}
 		defer l.Close()
 
+		// What the wizard runs, on a server already set up: it logs in as
+		// gogo, and every step reports.
+		var steps []provisioning.StepResult
+		if err := l.Provision(ctx, srv.ID, "", func(r provisioning.StepResult) { steps = append(steps, r) }); err != nil {
+			t.Fatalf("Provision again: %v\n%s", err, mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+		if len(steps) == 0 {
+			t.Error("Provision reported no steps")
+		}
+
 		// An hour back, in case the VM's clock is not quite this machine's.
 		samples, err := l.History(ctx, srv.ID, time.Now().Add(-time.Hour))
 		if err != nil || len(samples) == 0 {
