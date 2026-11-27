@@ -7,7 +7,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,8 @@ import (
 	"time"
 
 	"github.com/bubbleptr/vpsgogo/packages/core/fleet"
+	"github.com/bubbleptr/vpsgogo/packages/core/monitoring"
+	"github.com/bubbleptr/vpsgogo/packages/core/notify"
 	"github.com/bubbleptr/vpsgogo/packages/core/provisioning"
 	"github.com/bubbleptr/vpsgogo/packages/core/sshx"
 	"github.com/bubbleptr/vpsgogo/packages/core/vault"
@@ -129,10 +133,26 @@ func TestProvisionFreshVPS(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The agent alerts a webhook on this machine, which the VM reaches as
+	// host.lima.internal, over TLS with a CA of the test's own. Its URL
+	// carries a secret, as webhook URLs often do.
+	hook := startWebhook(t)
+	sb := make([]byte, 12)
+	rand.Read(sb)
+	secret := "hook-" + hex.EncodeToString(sb)
+	notifyJSON, _ := json.Marshal(notify.Config{Channels: []notify.ChannelConfig{{
+		Type: "webhook", URL: fmt.Sprintf("https://host.lima.internal:%d/hook?key=%s", hook.port, secret), CA: hook.caPEM,
+	}}})
+	rules := monitoring.DefaultRules()
+	rules.Units = []string{"vpsgogo-e2e-missing.service", "ssh.service"}
+	agentJSON, _ := json.Marshal(map[string]any{"name": "lima-vps", "rules": rules})
+	agentBin := buildAgent(t)
+	install := &provisioning.AgentInstall{Binary: agentBin, Config: agentJSON, Notify: notifyJSON}
+
 	var log bytes.Buffer
 	run := func(dropIn string) ([]provisioning.StepResult, error) {
 		var steps []provisioning.StepResult
-		p := &provisioning.Provisioner{Fleet: fl, Log: &log, SSHDDropIn: dropIn, Progress: func(r provisioning.StepResult) { steps = append(steps, r) }}
+		p := &provisioning.Provisioner{Fleet: fl, Log: &log, SSHDDropIn: dropIn, Agent: install, Progress: func(r provisioning.StepResult) { steps = append(steps, r) }}
 		return steps, p.Run(ctx, srv.ID, password)
 	}
 	rootStillWorks := func(t *testing.T) {
@@ -212,6 +232,74 @@ func TestProvisionFreshVPS(t *testing.T) {
 		}
 	})
 
+	t.Run("agent", func(t *testing.T) {
+		if out, err := vmShell(t, "systemctl is-active gogo-agent"); out != "active" {
+			t.Fatalf("gogo-agent is %q (%v)\n%s", out, err, mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+		if out, _ := vmShell(t, "ps -o user= -C gogo-agent"); out != "gogo-agent" {
+			t.Errorf("gogo-agent runs as %q", out)
+		}
+		// ss names processes only for root; seeing sshd proves it does here.
+		ss := mustVM(t, "ss -lntup")
+		if !strings.Contains(ss, "sshd") {
+			t.Fatalf("ss -lntup shows no process names, so it cannot tell:\n%s", ss)
+		}
+		if strings.Contains(ss, "gogo-agent") {
+			t.Errorf("gogo-agent listens on a port:\n%s", ss)
+		}
+		agentFilesPrivate(t)
+
+		// gogo reads samples over a new login, without sudo.
+		pem, _ := fl.PrivateKey(srv.ID)
+		gogo, _ := sshx.PrivateKey(pem)
+		c, err := sshx.Dial(ctx, sshx.Target{Host: srv.Host, Port: srv.Port, User: "gogo"}, gogo, fp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		var samples []monitoring.Sample
+		for deadline := time.Now().Add(45 * time.Second); ; time.Sleep(2 * time.Second) {
+			res, err := c.Exec(ctx, "gogo-agent query --since 0 --json")
+			if err == nil && res.Code == 0 && json.Unmarshal([]byte(res.Stdout), &samples) == nil && len(samples) > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("gogo-agent query as gogo: %+v %v", res, err)
+			}
+		}
+		vmNow, _ := strconv.ParseInt(mustVM(t, "date +%s"), 10, 64)
+		latest := samples[len(samples)-1]
+		if age := time.Unix(vmNow, 0).Sub(latest.Time); age < 0 || age > 30*time.Second {
+			t.Errorf("latest sample is %v old (VM clock): %+v", age, latest)
+		}
+		if latest.MemTotal == 0 || len(latest.Disks) == 0 || latest.Uptime == 0 {
+			t.Errorf("latest sample is missing readings: %+v", latest)
+		}
+
+		// The missing unit alerts the webhook; the running ssh.service doesn't.
+		var got []notify.Message
+		for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(time.Second) {
+			got = hook.messages()
+			if len(got) > 0 || time.Now().After(deadline) {
+				break
+			}
+		}
+		if len(got) == 0 {
+			t.Fatalf("no alert reached the webhook\n%s", mustVM(t, "journalctl -u gogo-agent --no-pager | tail -20"))
+		}
+		if m := got[0]; m.Server != "lima-vps" || !strings.Contains(m.Title, "vpsgogo-e2e-missing.service") {
+			t.Errorf("alert %+v", m)
+		}
+		for _, m := range got {
+			if strings.Contains(m.Title, "ssh.service") {
+				t.Errorf("a running unit alerted: %+v", m)
+			}
+		}
+		if q := hook.lastQuery(); q != "key="+secret {
+			t.Errorf("webhook called with query %q", q)
+		}
+	})
+
 	t.Run("rerun changes nothing", func(t *testing.T) {
 		ufwBefore, _ := vmShell(t, "ufw status verbose")
 		steps, err := run("")
@@ -229,6 +317,7 @@ func TestProvisionFreshVPS(t *testing.T) {
 		if out, _ := vmShell(t, "ufw status | grep -Ec '^22/tcp +ALLOW +Anywhere *$'"); out != "1" {
 			t.Errorf("ufw IPv4 22/tcp rules = %s", out)
 		}
+		agentFilesPrivate(t)
 		if after, _ := vmShell(t, "ufw status verbose"); after != ufwBefore {
 			t.Errorf("ufw changed on rerun:\n%s\n---\n%s", ufwBefore, after)
 		}
@@ -241,6 +330,9 @@ func TestProvisionFreshVPS(t *testing.T) {
 		if strings.Contains(log.String(), password) {
 			t.Fatal("root password in the provisioning log")
 		}
+		if strings.Contains(log.String(), secret) {
+			t.Fatal("the webhook secret from notify.json is in the provisioning log")
+		}
 		entries, _ := os.ReadDir(dbDir)
 		for _, e := range entries {
 			b, _ := os.ReadFile(filepath.Join(dbDir, e.Name()))
@@ -252,6 +344,53 @@ func TestProvisionFreshVPS(t *testing.T) {
 			t.Fatal("no database files to check")
 		}
 	})
+}
+
+// agentFilesPrivate checks that only root and the gogo-agent group can read
+// the agent's configuration, whose notify.json holds channel tokens.
+func agentFilesPrivate(t *testing.T) {
+	t.Helper()
+	for path, want := range map[string]string{
+		"/etc/gogo-agent":             "750 root:gogo-agent",
+		"/etc/gogo-agent/notify.json": "640 root:gogo-agent",
+		"/var/lib/gogo-agent":         "750 gogo-agent:gogo-agent",
+	} {
+		if out := mustVM(t, "stat -c '%a %U:%G' "+path); out != want {
+			t.Errorf("%s is %s, want %s", path, out, want)
+		}
+	}
+}
+
+// mustVM is vmShell that fails the test on error.
+func mustVM(t *testing.T, script string) string {
+	t.Helper()
+	out, err := vmShell(t, script)
+	if err != nil {
+		t.Fatalf("%s: %v\n%s", script, err, out)
+	}
+	return out
+}
+
+// buildAgent cross-compiles gogo-agent for the VM's architecture.
+func buildAgent(t *testing.T) func(arch string) ([]byte, error) {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "gogo-agent")
+	arch := map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[mustVM(t, "uname -m")]
+	cmd := exec.Command("go", "build", "-trimpath", "-o", out, "../../apps/agent/cmd/gogo-agent")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build gogo-agent: %v\n%s", err, b)
+	}
+	bin, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(a string) ([]byte, error) {
+		if a != arch {
+			return nil, fmt.Errorf("built for %s, asked for %s", arch, a)
+		}
+		return bin, nil
+	}
 }
 
 func tail(s string, n int) string {

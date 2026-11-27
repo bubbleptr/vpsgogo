@@ -1,8 +1,12 @@
 package sshx
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +168,25 @@ func TestIsAuthError(t *testing.T) {
 	_, err = Dial(context.Background(), Target{Host: "127.0.0.1", Port: 1, User: "root"}, ssh.Password("x"), "SHA256:x")
 	if IsAuthError(err) {
 		t.Fatalf("refused connection counted as auth error: %v", err)
+	}
+}
+
+func TestExecInputStreamsLargeStdin(t *testing.T) {
+	s := newTestServer(t)
+	c, err := dialRoot(t, s, s.fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	// Larger than any command line may be: a gogo-agent binary.
+	data := make([]byte, 8<<20)
+	rand.Read(data)
+	res, err := c.ExecInput(context.Background(), "sha256", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("%x\n", sha256.Sum256(data)); res.Stdout != want || res.Code != 0 {
+		t.Fatalf("got %+v, want stdout %q", res, want)
 	}
 }

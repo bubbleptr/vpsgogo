@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -119,6 +122,10 @@ func (s *testServer) serve(conn net.Conn, cfg *ssh.ServerConfig) {
 				switch payload.Command {
 				case "echo hi":
 					ch.Write([]byte("hi\n"))
+				case "sha256":
+					h := sha256.New()
+					io.Copy(h, ch)
+					fmt.Fprintf(ch, "%x\n", h.Sum(nil))
 				case "fail":
 					ch.Stderr().Write([]byte("boom"))
 					code = 3

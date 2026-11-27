@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -122,6 +123,13 @@ func dialConn(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.Cli
 // Exec runs cmd and waits for it. When ctx ends first, the session is closed
 // and ctx's error returned.
 func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
+	return c.ExecInput(ctx, cmd, nil)
+}
+
+// ExecInput is Exec with stdin streamed from in, for content too large or too
+// secret for a command line, such as a binary or a file holding tokens.
+// A nil in gives the command an empty stdin.
+func (c *Client) ExecInput(ctx context.Context, cmd string, in io.Reader) (ExecResult, error) {
 	sess, err := c.conn.NewSession()
 	if err != nil {
 		return ExecResult{}, fmt.Errorf("sshx: new session: %w", err)
@@ -129,6 +137,7 @@ func (c *Client) Exec(ctx context.Context, cmd string) (ExecResult, error) {
 	defer sess.Close()
 
 	var stdout, stderr bytes.Buffer
+	sess.Stdin = in
 	sess.Stdout = &stdout
 	sess.Stderr = &stderr
 	if err := sess.Start(cmd); err != nil {

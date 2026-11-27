@@ -15,6 +15,7 @@ import (
 // Session is a connection that runs commands; *sshx.Client is one.
 type Session interface {
 	Exec(ctx context.Context, cmd string) (sshx.ExecResult, error)
+	ExecInput(ctx context.Context, cmd string, in io.Reader) (sshx.ExecResult, error)
 	Close() error
 }
 
@@ -41,6 +42,26 @@ func (h *remote) exec(ctx context.Context, script string) (sshx.ExecResult, erro
 	}
 	fmt.Fprintf(h.log, "[exit %d]\n%s%s", res.Code, clip(res.Stdout), clip(res.Stderr))
 	return res, nil
+}
+
+// runInput runs script as root with stdin from in, which is never logged:
+// binaries, and files holding tokens.
+func (h *remote) runInput(ctx context.Context, script string, in io.Reader) error {
+	cmd := "sh -c " + shellQuote(script)
+	if !h.root {
+		cmd = "sudo -n " + cmd
+	}
+	res, err := h.s.ExecInput(ctx, cmd, in)
+	fmt.Fprintf(h.log, "$ %s  (stdin not logged)\n", script)
+	if err != nil {
+		fmt.Fprintf(h.log, "! %v\n", err)
+		return err
+	}
+	fmt.Fprintf(h.log, "[exit %d]\n%s%s", res.Code, clip(res.Stdout), clip(res.Stderr))
+	if res.Code != 0 {
+		return fmt.Errorf("provisioning: %q exited %d: %s", firstLine(script), res.Code, strings.TrimSpace(res.Stderr))
+	}
+	return nil
 }
 
 // run is exec that treats a non-zero exit as an error.

@@ -1,0 +1,17 @@
+sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
+proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
+udev /dev devtmpfs rw,nosuid,relatime,size=987654k,nr_inodes=246913,mode=755,inode64 0 0
+devpts /dev/pts devpts rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000 0 0
+tmpfs /run tmpfs rw,nosuid,nodev,noexec,relatime,size=201432k,mode=755,inode64 0 0
+/dev/vda1 / ext4 rw,relatime,discard,errors=remount-ro 0 0
+securityfs /sys/kernel/security securityfs rw,nosuid,nodev,noexec,relatime 0 0
+tmpfs /dev/shm tmpfs rw,nosuid,nodev,inode64 0 0
+cgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot 0 0
+/dev/vda15 /boot/efi vfat rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro 0 0
+/dev/vdb1 /mnt/my\040data xfs rw,relatime,attr2,inode64,logbufs=8,logbsize=32k,noquota 0 0
+/dev/vdc1 /development ext4 rw,relatime 0 0
+/dev/vdd1 /run/media/usb ext4 rw,relatime 0 0
+/dev/loop0 /snap/core22/1612 squashfs ro,nodev,relatime,errors=continue,threads=single 0 0
+/dev/vda1 /var/lib/docker/volumes/data ext4 rw,relatime,discard,errors=remount-ro 0 0
+overlay /var/lib/docker/overlay2/3f1c/merged overlay rw,relatime,lowerdir=/var/lib/docker/overlay2/l/ABC,upperdir=/var/lib/docker/overlay2/3f1c/diff,workdir=/var/lib/docker/overlay2/3f1c/work 0 0
+nsfs /run/docker/netns/1a2b nsfs rw 0 0
