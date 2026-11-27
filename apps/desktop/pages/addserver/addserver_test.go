@@ -242,3 +242,19 @@ func TestSetupAddsTheProbedTarget(t *testing.T) {
 	}
 	t.Fatalf("no AddServer in %+v", calls)
 }
+
+func TestPlanThatDidNotSyncDoesNotStopSetup(t *testing.T) {
+	g := newRig(t)
+	g.serverStep()
+	g.click("Trust this server")
+	g.b.SyncErr = errors.New("srv-1: not reachable") // provisioning syncs it next
+	g.click("Continue")
+	g.flush()
+	g.want("Server ready")
+	if n := g.b.Count("SavePlan"); n != 1 {
+		t.Fatalf("SavePlan ran %d times", n)
+	}
+	if _, ok := g.s.Plan("srv-1"); !ok {
+		t.Fatal("the store has no plan")
+	}
+}

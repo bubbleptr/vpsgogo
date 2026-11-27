@@ -6,6 +6,7 @@ package addserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -237,7 +238,9 @@ func (p *Page) startSetup() {
 		}
 		if plan != nil {
 			plan.ServerID = srv.ID
-			if err := b.SavePlan(ctx, *plan); err != nil {
+			// A plan stored but not synced is saved: Provision writes the
+			// agent's config next, plan included.
+			if err := b.SavePlan(ctx, *plan); err != nil && !errors.As(err, new(*services.SyncError)) {
 				fail(err)
 				return
 			}

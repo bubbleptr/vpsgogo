@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -53,10 +54,14 @@ type Page struct {
 	streamErr          string
 	historyErr         string
 
-	form       *planform.Form // the plan being added or edited
-	planMsg    string
-	planErr    string
-	planBusy   bool
+	form     *planform.Form // the plan being added or edited
+	planMsg  string
+	planErr  string
+	planBusy bool
+	// planWarn says a plan change was stored but did not reach the agent;
+	// resync retries only the sync.
+	planWarn   string
+	resync     func(ctx context.Context) error
 	confirming bool
 	removeErr  string
 }
@@ -280,28 +285,44 @@ func (p *Page) plan(c *ui.Context, pal theme.Palette) {
 	if p.planErr != "" {
 		ui.Text(c, p.planErr).TextColor(theme.Coral)
 	}
+	if p.planWarn != "" {
+		ui.Row(c).Gap(12).Children(func() {
+			ui.Text(c, p.planWarn).TextColor(theme.Amber)
+			if ui.Button(c, "Retry sync").Disabled(p.planBusy).Clicked() {
+				sync := p.resync
+				p.do(func(ctx context.Context) (func(), string, func(context.Context) error, error) {
+					return func() {}, "", sync, sync(ctx)
+				})
+			}
+		})
+	}
 }
 
-// do runs one plan call. On success its store update applies, and, if the
-// page still shows this server, msg.
-func (p *Page) do(call func(ctx context.Context) (update func(), msg string, err error)) {
-	p.planBusy, p.planMsg, p.planErr = true, "", ""
+// do runs one plan call. A change stored without reaching the agent (a
+// *services.SyncError) counts as made: its store update applies, and a
+// warning offers sync, which repeats only the sync. Results show only if
+// the page still shows this server; the store takes them regardless.
+func (p *Page) do(call func(ctx context.Context) (update func(), msg string, sync func(context.Context) error, err error)) {
+	p.planBusy, p.planMsg, p.planErr, p.planWarn = true, "", "", ""
 	gen := p.gen
 	p.o.Runner.Go(func(post func(func())) {
-		update, msg, err := call(context.Background())
+		update, msg, sync, err := call(context.Background())
 		post(func() {
-			if err == nil {
-				update()
+			var unsynced *services.SyncError
+			if err != nil && !errors.As(err, &unsynced) {
+				if gen == p.gen {
+					p.planBusy, p.planErr = false, err.Error()
+				}
+				return
 			}
+			update()
 			if gen != p.gen {
 				return
 			}
-			p.planBusy = false
-			if err != nil {
-				p.planErr = err.Error()
-				return
+			p.planBusy, p.form, p.planMsg = false, nil, msg
+			if unsynced != nil {
+				p.planWarn, p.resync = "Saved, but the agent wasn't updated: "+unsynced.Err.Error(), sync
 			}
-			p.form, p.planMsg = nil, msg
 		})
 	})
 }
@@ -311,23 +332,27 @@ func (p *Page) savePlan() {
 	if err != nil {
 		return // the form shows it
 	}
-	p.do(func(ctx context.Context) (func(), string, error) {
-		return func() { p.o.Store.PutPlan(s) }, "", p.o.Backend.SavePlan(ctx, s)
+	sync := func(ctx context.Context) error { return p.o.Backend.SavePlan(ctx, s) }
+	p.do(func(ctx context.Context) (func(), string, func(context.Context) error, error) {
+		return func() { p.o.Store.PutPlan(s) }, "", sync, sync(ctx)
 	})
 }
 
 func (p *Page) renew() {
-	id := p.id
-	p.do(func(ctx context.Context) (func(), string, error) {
-		s, err := p.o.Backend.Renew(ctx, id)
-		return func() { p.o.Store.PutPlan(s) }, "Renewed until " + s.ExpiresAt.String(), err
+	id, b := p.id, p.o.Backend
+	p.do(func(ctx context.Context) (func(), string, func(context.Context) error, error) {
+		s, err := b.Renew(ctx, id)
+		// Saving the renewed plan again syncs it without another cycle.
+		sync := func(ctx context.Context) error { return b.SavePlan(ctx, s) }
+		return func() { p.o.Store.PutPlan(s) }, "Renewed until " + s.ExpiresAt.String(), sync, err
 	})
 }
 
 func (p *Page) deletePlan() {
-	id := p.id
-	p.do(func(ctx context.Context) (func(), string, error) {
-		return func() { p.o.Store.RemovePlan(id) }, "", p.o.Backend.DeletePlan(ctx, id)
+	id, b := p.id, p.o.Backend
+	sync := func(ctx context.Context) error { return b.DeletePlan(ctx, id) }
+	p.do(func(ctx context.Context) (func(), string, func(context.Context) error, error) {
+		return func() { p.o.Store.RemovePlan(id) }, "", sync, sync(ctx)
 	})
 }
 

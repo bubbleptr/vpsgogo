@@ -42,6 +42,10 @@ type Backend struct {
 	ProvisionFailAt int
 	// TestChannelErr fails every TestChannel while set.
 	TestChannelErr error
+	// SyncErr, while set, has SavePlan, DeletePlan, Renew and SaveSettings
+	// store their change and then return it in a *services.SyncError, as
+	// the live backend does when an agent cannot be reached.
+	SyncErr error
 
 	servers    []fleet.Server
 	plans      map[string]renewal.Subscription
@@ -144,6 +148,14 @@ func (b *Backend) SavedSettings() services.Settings {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.settings
+}
+
+// synced returns the error of a stored change; b.mu must be held.
+func (b *Backend) synced() error {
+	if b.SyncErr != nil {
+		return &services.SyncError{Err: b.SyncErr}
+	}
+	return nil
 }
 
 // record notes a call; b.mu must be held.
@@ -290,7 +302,7 @@ func (b *Backend) SavePlan(ctx context.Context, s renewal.Subscription) error {
 		return err
 	}
 	b.plans[s.ServerID] = s
-	return nil
+	return b.synced()
 }
 
 func (b *Backend) DeletePlan(ctx context.Context, id string) error {
@@ -298,7 +310,7 @@ func (b *Backend) DeletePlan(ctx context.Context, id string) error {
 	defer b.mu.Unlock()
 	b.record("DeletePlan", id)
 	delete(b.plans, id)
-	return nil
+	return b.synced()
 }
 
 // Renew moves the plan on one cycle with core's Renewed.
@@ -315,7 +327,7 @@ func (b *Backend) Renew(ctx context.Context, id string) (renewal.Subscription, e
 		return renewal.Subscription{}, err
 	}
 	b.plans[id] = s
-	return s, nil
+	return s, b.synced()
 }
 
 func (b *Backend) Settings(ctx context.Context) (services.Settings, error) {
@@ -333,7 +345,7 @@ func (b *Backend) SaveSettings(ctx context.Context, s services.Settings) error {
 	b.record("SaveSettings", s)
 	s.Channels = slices.Clone(s.Channels)
 	b.settings = s
-	return nil
+	return b.synced()
 }
 
 func (b *Backend) TestChannel(ctx context.Context, ch notify.ChannelConfig) error {

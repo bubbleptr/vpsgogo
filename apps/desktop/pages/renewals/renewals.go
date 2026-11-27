@@ -5,6 +5,7 @@ package renewals
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -36,6 +37,9 @@ type Page struct {
 	msg   string
 	err   string
 	busy  bool
+	// warn says a renewal was stored but did not reach syncID's agent.
+	warn   string
+	syncID string
 }
 
 // New returns the page.
@@ -158,6 +162,14 @@ func (p *Page) list(c *ui.Context, pal theme.Palette, plans []renewal.Subscripti
 	if p.err != "" {
 		ui.Text(c, p.err).TextColor(theme.Coral)
 	}
+	if p.warn != "" {
+		ui.Row(c).Gap(12).Children(func() {
+			ui.Text(c, p.warn).TextColor(theme.Amber)
+			if ui.Button(c, "Retry sync").Disabled(p.busy).Clicked() {
+				p.retrySync()
+			}
+		})
+	}
 	for _, s := range plans {
 		name := p.o.Store.Name(s.ServerID)
 		ui.Row(c.Key(s.ServerID)).Gap(16).Padding(12).Radius(12).Background(pal.Paper).Children(func() {
@@ -172,17 +184,48 @@ func (p *Page) list(c *ui.Context, pal theme.Palette, plans []renewal.Subscripti
 }
 
 func (p *Page) renew(id, name string) {
-	p.busy, p.msg, p.err = true, "", ""
+	p.busy, p.msg, p.err, p.warn = true, "", "", ""
 	p.o.Runner.Go(func(post func(func())) {
 		s, err := p.o.Backend.Renew(context.Background(), id)
 		post(func() {
 			p.busy = false
-			if err != nil {
+			// A renewal that did not sync was stored all the same: show it,
+			// or renewing again would add another cycle.
+			var unsynced *services.SyncError
+			if err != nil && !errors.As(err, &unsynced) {
 				p.err = err.Error()
 				return
 			}
 			p.o.Store.PutPlan(s)
 			p.msg = fmt.Sprintf("%s renewed until %s", name, s.ExpiresAt)
+			if unsynced != nil {
+				p.warn, p.syncID = "Saved, but the agent wasn't updated: "+unsynced.Err.Error(), id
+			}
+		})
+	})
+}
+
+// retrySync saves the stored plan again, which syncs it without renewing.
+func (p *Page) retrySync() {
+	s, ok := p.o.Store.Plan(p.syncID)
+	if !ok {
+		p.warn = ""
+		return
+	}
+	p.busy, p.err = true, ""
+	p.o.Runner.Go(func(post func(func())) {
+		err := p.o.Backend.SavePlan(context.Background(), s)
+		post(func() {
+			p.busy = false
+			var unsynced *services.SyncError
+			switch {
+			case errors.As(err, &unsynced):
+				p.warn = "Saved, but the agent wasn't updated: " + unsynced.Err.Error()
+			case err != nil:
+				p.err = err.Error()
+			default:
+				p.warn = ""
+			}
 		})
 	})
 }

@@ -268,3 +268,44 @@ func TestHistoryErrorOffersReload(t *testing.T) {
 		t.Fatal("the error stays after reloading")
 	}
 }
+
+func TestRenewThatDidNotSyncKeepsTheNewDate(t *testing.T) {
+	g := newRig(t, monthly)
+	g.open()
+	g.b.SyncErr = errors.New("web-1: connection refused")
+	g.click("Mark renewed")
+	g.flush()
+	g.want("Renewed until 2027-01-15", "Expires 2027-01-15",
+		"Saved, but the agent wasn't updated: web-1: connection refused")
+
+	g.b.SyncErr = nil
+	g.click("Retry sync")
+	g.flush()
+	if g.tt.HasText("wasn't updated") {
+		t.Fatal("the warning stays after a sync that worked")
+	}
+	if r, s := g.b.Count("Renew"), g.b.Count("SavePlan"); r != 1 || s != 1 {
+		t.Fatalf("Renew ran %d times, SavePlan %d", r, s)
+	}
+	if p, _ := g.b.Plan("srv-1"); p.ExpiresAt != (renewal.Date{Year: 2027, Month: 1, Day: 15}) {
+		t.Fatalf("stored expiry %v", p.ExpiresAt)
+	}
+}
+
+func TestDeleteThatDidNotSyncRetriesTheDelete(t *testing.T) {
+	g := newRig(t, monthly)
+	g.open()
+	g.b.SyncErr = errors.New("web-1: connection refused")
+	g.click("Delete plan")
+	g.flush()
+	g.want("No plan", "Saved, but the agent wasn't updated")
+	g.b.SyncErr = nil
+	g.click("Retry sync")
+	g.flush()
+	if g.b.Count("DeletePlan") != 2 || g.b.Count("SavePlan") != 0 {
+		t.Fatalf("calls %+v", g.b.Calls())
+	}
+	if g.tt.HasText("wasn't updated") {
+		t.Fatal("the warning stays")
+	}
+}

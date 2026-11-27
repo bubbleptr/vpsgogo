@@ -6,6 +6,7 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -67,6 +68,8 @@ type Page struct {
 	msg      string
 	err      string
 	busy     bool // a save is in flight
+	warn     string
+	unsynced services.Settings // what Retry sync sends again
 	// gen counts drafts: a save's result shows only on the draft it saved.
 	gen int
 }
@@ -111,6 +114,12 @@ func (p *Page) View(c *ui.Context) {
 				}
 				if p.msg != "" {
 					ui.Text(c, p.msg).TextColor(theme.Green)
+				}
+				if p.warn != "" {
+					ui.Text(c, p.warn).TextColor(theme.Amber)
+					if ui.Button(c, "Retry sync").Disabled(p.busy).Clicked() {
+						p.send(p.unsynced)
+					}
 				}
 				if p.err != "" {
 					ui.Text(c, p.err).TextColor(theme.Coral)
@@ -253,23 +262,35 @@ func (p *Page) save() {
 		p.err = err.Error()
 		return
 	}
-	p.busy = true
+	p.send(s)
+}
+
+// send saves s. Settings stored without reaching every agent (a
+// *services.SyncError) count as saved, with a warning whose Retry sync
+// sends the same settings again.
+func (p *Page) send(s services.Settings) {
+	p.busy, p.msg, p.err, p.warn = true, "", "", ""
 	gen := p.gen
 	p.o.Runner.Go(func(post func(func())) {
 		err := p.o.Backend.SaveSettings(context.Background(), s)
 		post(func() {
-			if err == nil {
+			var unsynced *services.SyncError
+			saved := err == nil || errors.As(err, &unsynced)
+			if saved {
 				p.o.Store.Settings = s
 			}
 			if gen != p.gen {
 				return
 			}
 			p.busy = false
-			if err != nil {
+			switch {
+			case !saved:
 				p.err = err.Error()
-				return
+			case unsynced != nil:
+				p.warn, p.unsynced = "Saved, but some agents weren't updated: "+unsynced.Err.Error(), s
+			default:
+				p.msg = "Settings saved"
 			}
-			p.msg = "Settings saved"
 		})
 	})
 }

@@ -1,6 +1,7 @@
 package renewals
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -103,4 +104,28 @@ func TestOneTimePlanRenewRefused(t *testing.T) {
 func TestExpiredPlan(t *testing.T) {
 	g := newRig(t, sub("srv-1", 2026, 11, 30, renewal.Monthly, "", ""))
 	g.want("Expired yesterday")
+}
+
+func TestRenewThatDidNotSyncKeepsTheNewDate(t *testing.T) {
+	g := newRig(t, sub("srv-1", 2026, 12, 20, renewal.Monthly, "5.99", "USD"))
+	g.b.SyncErr = errors.New("web-1: connection refused")
+	g.click("Mark web-1 renewed")
+	g.r.Flush()
+	g.tt.Frame()
+	g.want("web-1 renewed until 2027-01-20", "Expires 2027-01-20",
+		"Saved, but the agent wasn't updated: web-1: connection refused")
+
+	g.b.SyncErr = nil
+	g.click("Retry sync")
+	g.r.Flush()
+	g.tt.Frame()
+	if g.tt.HasText("wasn't updated") {
+		t.Fatal("the warning stays after a sync that worked")
+	}
+	if r, s := g.b.Count("Renew"), g.b.Count("SavePlan"); r != 1 || s != 1 {
+		t.Fatalf("Renew ran %d times, SavePlan %d", r, s)
+	}
+	if p, _ := g.b.Plan("srv-1"); p.ExpiresAt != (renewal.Date{Year: 2027, Month: 1, Day: 20}) {
+		t.Fatalf("stored expiry %v", p.ExpiresAt)
+	}
 }

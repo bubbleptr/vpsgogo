@@ -227,3 +227,22 @@ func TestReopeningMidSaveKeepsTheDraft(t *testing.T) {
 		t.Fatalf("after the save, the draft has %q", a.Value)
 	}
 }
+
+func TestSaveThatDidNotSyncOffersRetry(t *testing.T) {
+	g := newRig(t, services.Settings{RemindHour: 9})
+	g.typeInto("Timezone", "Asia/Tokyo")
+	g.b.SyncErr = errors.New("web-1: connection refused")
+	g.click("Save")
+	g.flush()
+	g.want("Saved, but some agents weren't updated: web-1: connection refused")
+	if g.s.Settings.Timezone != "Asia/Tokyo" {
+		t.Fatal("the store missed settings that were saved")
+	}
+	g.b.SyncErr = nil
+	g.click("Retry sync")
+	g.flush()
+	g.want("Settings saved")
+	if g.tt.HasText("weren't updated") || g.b.Count("SaveSettings") != 2 || g.b.SavedSettings().Timezone != "Asia/Tokyo" {
+		t.Fatalf("retry: %+v", g.b.SavedSettings())
+	}
+}
