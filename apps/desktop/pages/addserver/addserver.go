@@ -39,6 +39,12 @@ const (
 	stepSetup
 )
 
+// target is where a server is.
+type target struct {
+	host string
+	port int
+}
+
 // Page is the wizard's state.
 type Page struct {
 	o    Options
@@ -56,6 +62,9 @@ type Page struct {
 	busy        bool
 	err         string
 	fingerprint string
+	// probed is the host:port fingerprint belongs to; setup adds that
+	// server, whatever the fields say since.
+	probed target
 
 	plan     *planform.Form
 	withPlan bool
@@ -102,8 +111,9 @@ func (p *Page) View(c *ui.Context) {
 func (p *Page) serverStep(c *ui.Context) {
 	ui.Form(c, func() {
 		ui.Field(c, "Name", func() { ui.TextInput(c, &p.name).Placeholder("Optional") })
-		ui.Field(c, "Host", func() { ui.TextInput(c, &p.host).Placeholder("IP address or host name") })
-		ui.Field(c, "Port", func() { ui.NumberInput(c, &p.port, 0, 999999, 1) })
+		// The target stays as probed until the probe returns.
+		ui.Field(c, "Host", func() { ui.TextInput(c, &p.host).Placeholder("IP address or host name").Disabled(p.busy) })
+		ui.Field(c, "Port", func() { ui.NumberInput(c, &p.port, 0, 999999, 1).Disabled(p.busy) })
 		ui.Field(c, "Provider", func() { ui.TextInput(c, &p.provider).Placeholder("Optional") })
 		ui.Field(c, "Root password", func() { ui.TextInput(c, &p.password).Password() })
 	})
@@ -126,19 +136,23 @@ func (p *Page) connect() {
 		return
 	}
 	p.err, p.busy = "", true
-	port, gen := int(p.port), p.gen
+	t, gen := target{host, int(p.port)}, p.gen
 	p.o.Runner.Go(func(post func(func())) {
-		fp, err := p.o.Backend.Probe(context.Background(), host, port)
+		fp, err := p.o.Backend.Probe(context.Background(), t.host, t.port)
 		post(func() {
 			if gen != p.gen {
 				return
 			}
 			p.busy = false
+			if (target{strings.TrimSpace(p.host), int(p.port)}) != t {
+				p.err = "The host or port changed while connecting. Connect again."
+				return
+			}
 			if err != nil {
 				p.err = err.Error()
 				return
 			}
-			p.fingerprint, p.step = fp, stepFingerprint
+			p.fingerprint, p.probed, p.step = fp, t, stepFingerprint
 		})
 	})
 }
@@ -197,7 +211,7 @@ func (p *Page) startSetup() {
 		}
 		plan = &s
 	}
-	n := fleet.NewServer{Name: strings.TrimSpace(p.name), Host: strings.TrimSpace(p.host), Port: int(p.port), Provider: strings.TrimSpace(p.provider)}
+	n := fleet.NewServer{Name: strings.TrimSpace(p.name), Host: p.probed.host, Port: p.probed.port, Provider: strings.TrimSpace(p.provider)}
 	fp, password := p.fingerprint, p.password
 	b := p.o.Backend
 	p.o.Runner.Go(func(post func(func())) {

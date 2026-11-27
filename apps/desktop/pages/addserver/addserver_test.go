@@ -8,6 +8,7 @@ import (
 	"github.com/bubbleptr/vpsgogo/apps/desktop/entities/store"
 	"github.com/bubbleptr/vpsgogo/apps/desktop/services/fake"
 	"github.com/bubbleptr/vpsgogo/apps/desktop/shared/async"
+	"github.com/bubbleptr/vpsgogo/packages/core/fleet"
 	"github.com/bubbleptr/vpsgogo/packages/core/renewal"
 	"github.com/egoist/mygo/ui"
 )
@@ -197,4 +198,47 @@ func TestRetryProvisionsTheSameServer(t *testing.T) {
 	if _, ok := g.s.Plan("srv-1"); !ok {
 		t.Fatal("the store has no plan")
 	}
+}
+
+func TestTargetIsLockedWhileProbing(t *testing.T) {
+	g := newRig(t)
+	g.typeInto("Host", "203.0.113.7")
+	g.click("Connect")
+	for _, label := range []string{"Host", "Port"} {
+		if a, ok := g.tt.AccessByRole(ui.RoleTextField, label); !ok || !a.Disabled {
+			t.Fatalf("%s is editable while probing: %+v", label, a)
+		}
+	}
+}
+
+func TestProbeOfAnOldTargetIsDiscarded(t *testing.T) {
+	g := newRig(t)
+	g.typeInto("Host", "203.0.113.7")
+	g.click("Connect")
+	g.p.host = "198.51.100.9" // edited before the probe of .7 returned
+	g.flush()
+	if g.tt.HasText(g.b.Fingerprint) || g.p.step != stepServer {
+		t.Fatal("took the fingerprint of another host")
+	}
+	g.want("Connect")
+}
+
+func TestSetupAddsTheProbedTarget(t *testing.T) {
+	g := newRig(t)
+	g.serverStep()
+	g.click("Trust this server")
+	g.p.host, g.p.port = "198.51.100.9", 2222 // changed after the probe
+	g.click("Skip")
+	g.flush()
+	calls := g.b.Calls()
+	for _, c := range calls {
+		if c.Method == "AddServer" {
+			n := c.Args[0].(fleet.NewServer)
+			if n.Host != "203.0.113.7" || n.Port != 22 || c.Args[1] != g.b.Fingerprint {
+				t.Fatalf("added %+v with %v", n, c.Args[1])
+			}
+			return
+		}
+	}
+	t.Fatalf("no AddServer in %+v", calls)
 }
