@@ -55,11 +55,8 @@ type Page struct {
 	status map[string]*status
 }
 
-// New returns the page for an app described by info, with no fleet.
-func New(info services.AppInfo) *Page { return NewWith(Options{Info: info}) }
-
-// NewWith returns the page over o's backend.
-func NewWith(o Options) *Page { return &Page{o: o, status: map[string]*status{}} }
+// New returns the page over o's backend.
+func New(o Options) *Page { return &Page{o: o, status: map[string]*status{}} }
 
 // Opened makes the page poll every server at its next frame, as when the
 // user comes back to it.

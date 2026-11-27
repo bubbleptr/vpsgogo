@@ -58,7 +58,7 @@ func New(o Options) *App {
 		o.Now = time.Now
 	}
 	a := &App{o: o}
-	a.dashboard = dashboard.NewWith(dashboard.Options{
+	a.dashboard = dashboard.New(dashboard.Options{
 		Info: o.Info, Backend: o.Backend, Runner: o.Runner, Store: &a.store,
 		Now: o.Now, Today: a.today,
 		OnAdd:  func() { a.navigate(routeAdd) },

@@ -339,7 +339,7 @@ func (p *Page) remove(c *ui.Context, pal theme.Palette, name string) {
 	if p.removeErr != "" {
 		ui.Text(c, p.removeErr).TextColor(theme.Coral)
 	}
-	msg := "VPSGoGo forgets this server, its key and its plan. The server itself keeps running."
+	msg := "VPSGoGo forgets this server, its plan and its SSH key. Once set up, the server allows neither root nor password logins, so without this key nobody can log in over SSH. The server itself keeps running."
 	if ui.AlertDialog(c, &p.confirming, "Remove "+name+"?", msg, "Cancel", "Remove") == 1 {
 		id, gen := p.id, p.gen
 		p.o.Runner.Go(func(post func(func())) {

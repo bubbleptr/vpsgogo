@@ -18,7 +18,7 @@ import (
 var now = time.Date(2026, 12, 1, 9, 0, 0, 0, time.UTC)
 
 func TestShowsAppInfo(t *testing.T) {
-	p := New(services.AppInfo{Version: "0.1.0-test", OS: "darwin", Arch: "arm64"})
+	p := New(Options{Info: services.AppInfo{Version: "0.1.0-test", OS: "darwin", Arch: "arm64"}})
 	for _, dark := range []bool{false, true} {
 		tt := ui.NewTesterWith(p.View, 1200, 780, ui.TesterOptions{Dark: dark})
 		for _, want := range []string{"VPSGoGo", "v0.1.0-test · darwin/arm64"} {
@@ -41,7 +41,7 @@ type rig struct {
 
 func newRig(t *testing.T, servers ...fleet.Server) *rig {
 	g := &rig{t: t, b: fake.New(), r: &async.Manual{}, s: &store.Store{Loaded: true, Servers: servers}}
-	p := NewWith(Options{
+	p := New(Options{
 		Backend: g.b, Runner: g.r, Store: g.s,
 		Now:    func() time.Time { return now },
 		Today:  func() renewal.Date { return renewal.DateOf(now) },
