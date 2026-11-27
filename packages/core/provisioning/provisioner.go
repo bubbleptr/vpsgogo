@@ -285,6 +285,22 @@ func (p *Provisioner) agentHealthy(srv fleet.Server, auth ssh.AuthMethod) func(c
 // agent answers. The desktop app calls it whenever the server's plan or
 // rules change (docs/SPEC.md §4.3).
 func (p *Provisioner) SyncAgentConfig(ctx context.Context, id string, config []byte) (bool, error) {
+	return p.syncAgent(ctx, id, func(h agentHost, healthy func(context.Context) error) (bool, error) {
+		return syncAgentConfig(ctx, h, config, healthy)
+	})
+}
+
+// SyncAgentNotify is SyncAgentConfig for /etc/gogo-agent/notify.json, the
+// notify.Config JSON of the user's channels. Nil removes the file. The
+// desktop app calls it whenever the channels change (docs/SPEC.md §4.4).
+func (p *Provisioner) SyncAgentNotify(ctx context.Context, id string, notify []byte) (bool, error) {
+	return p.syncAgent(ctx, id, func(h agentHost, healthy func(context.Context) error) (bool, error) {
+		return syncAgentNotify(ctx, h, notify, healthy)
+	})
+}
+
+// syncAgent logs in to provisioned server id as gogo and runs sync.
+func (p *Provisioner) syncAgent(ctx context.Context, id string, sync func(agentHost, func(context.Context) error) (bool, error)) (bool, error) {
 	srv, err := p.Fleet.Get(ctx, id)
 	if err != nil {
 		return false, err
@@ -305,8 +321,7 @@ func (p *Provisioner) SyncAgentConfig(ctx context.Context, id string, config []b
 		return false, fmt.Errorf("provisioning: connect: %w", err)
 	}
 	defer s.Close()
-	h := &remote{s: s, root: false, log: p.log()}
-	return syncAgentConfig(ctx, h, config, p.agentHealthy(srv, auth))
+	return sync(&remote{s: s, root: false, log: p.log()}, p.agentHealthy(srv, auth))
 }
 
 // checkHardened looks at sshd -T output (keys are lower case).
