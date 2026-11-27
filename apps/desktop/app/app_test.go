@@ -222,3 +222,55 @@ func TestLoadErrorOffersRetry(t *testing.T) {
 	w.flush()
 	w.want("No servers yet")
 }
+
+func TestLeavingTheWizardDropsItsPendingResults(t *testing.T) {
+	w := newWalk(t, false)
+	// A probe still running as the user leaves.
+	w.click("Add server")
+	w.typeInto("Host", "203.0.113.7")
+	w.click("Connect")
+	w.click("Dashboard")
+	w.flush()
+	w.click("Add server")
+	w.want("Connect")
+	if w.tt.HasText(w.b.Fingerprint) {
+		t.Fatal("the wizard opened on the last probe's fingerprint")
+	}
+
+	// A setup still running as the user leaves: the next server is added
+	// on its own, not as the last one.
+	w.typeInto("Host", "203.0.113.7")
+	w.click("Connect")
+	w.flush()
+	w.click("Trust this server")
+	w.click("Skip")
+	w.click("Dashboard")
+	w.flush()
+	w.click("Add server")
+	w.want("Connect")
+	w.typeInto("Host", "203.0.113.8")
+	w.click("Connect")
+	w.flush()
+	w.click("Trust this server")
+	w.click("Skip")
+	w.flush()
+	w.want("Server ready")
+	if n := w.b.Count("AddServer"); n != 2 {
+		t.Fatalf("AddServer ran %d times for two servers", n)
+	}
+}
+
+func TestSettingsOpenedWhileLoadingShowLoadedValues(t *testing.T) {
+	w := &walk{t: t, b: fake.New(), r: &async.Manual{}}
+	w.b.SaveSettings(context.Background(), services.Settings{Timezone: "Asia/Tokyo", AnthropicKey: "sk-ant-x"})
+	a := New(Options{Backend: w.b, Runner: w.r, Now: func() time.Time { return now }})
+	w.tt = ui.NewTester(a.View, 1280, 1000)
+	w.click("Settings")
+	w.flush()
+	w.want("Anthropic API key: set")
+	w.click("Save")
+	w.flush()
+	if s := w.b.SavedSettings(); s.Timezone != "Asia/Tokyo" || s.AnthropicKey != "sk-ant-x" {
+		t.Fatalf("Save wrote %+v", s)
+	}
+}

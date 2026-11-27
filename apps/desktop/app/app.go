@@ -112,6 +112,9 @@ func (a *App) load() {
 		post(func() {
 			a.loading = false
 			a.store = store.Store{Loaded: true, Servers: servers, Plans: plans, Settings: s}
+			if a.route == routeSettings {
+				a.settings.Open() // its draft was taken from nothing
+			}
 		})
 	})
 }

@@ -43,6 +43,9 @@ const (
 type Page struct {
 	o    Options
 	step step
+	// gen counts Resets: a task's result applies only to the wizard that
+	// started it.
+	gen int
 
 	name, host, provider string
 	port                 float64
@@ -72,7 +75,7 @@ func New(o Options) *Page {
 
 // Reset starts the wizard over and forgets the password.
 func (p *Page) Reset() {
-	*p = Page{o: p.o, port: 22}
+	*p = Page{o: p.o, gen: p.gen + 1, port: 22}
 }
 
 // View builds the current step.
@@ -123,10 +126,13 @@ func (p *Page) connect() {
 		return
 	}
 	p.err, p.busy = "", true
-	port := int(p.port)
+	port, gen := int(p.port), p.gen
 	p.o.Runner.Go(func(post func(func())) {
 		fp, err := p.o.Backend.Probe(context.Background(), host, port)
 		post(func() {
+			if gen != p.gen {
+				return
+			}
 			p.busy = false
 			if err != nil {
 				p.err = err.Error()
@@ -180,8 +186,8 @@ func (p *Page) planStep(c *ui.Context, pal theme.Palette) {
 // startSetup runs setup from its first unfinished stage: AddServer, then
 // SavePlan, then Provision. A retry never adds the server again.
 func (p *Page) startSetup() {
-	p.step, p.busy, p.err, p.progress = stepSetup, true, "", nil
-	srv := p.server
+	p.step, p.busy, p.done, p.err, p.progress = stepSetup, true, false, "", nil
+	srv, gen := p.server, p.gen
 	var plan *renewal.Subscription
 	if p.withPlan && !p.planSaved {
 		s, err := p.plan.Plan("new")
@@ -196,7 +202,16 @@ func (p *Page) startSetup() {
 	b := p.o.Backend
 	p.o.Runner.Go(func(post func(func())) {
 		ctx := context.Background()
-		fail := func(err error) { post(func() { p.busy, p.err = false, err.Error() }) }
+		// The store learns of what was stored even if the user left; the
+		// wizard only of its own setup.
+		mine := func(f func()) func() {
+			return func() {
+				if gen == p.gen {
+					f()
+				}
+			}
+		}
+		fail := func(err error) { post(mine(func() { p.busy, p.err = false, err.Error() })) }
 		if srv == nil {
 			s, err := b.AddServer(ctx, n, fp)
 			if err != nil {
@@ -204,7 +219,7 @@ func (p *Page) startSetup() {
 				return
 			}
 			srv = &s
-			post(func() { p.server = &s; p.o.Store.PutServer(s) })
+			post(func() { p.o.Store.PutServer(s); mine(func() { p.server = &s })() })
 		}
 		if plan != nil {
 			plan.ServerID = srv.ID
@@ -213,16 +228,16 @@ func (p *Page) startSetup() {
 				return
 			}
 			saved := *plan
-			post(func() { p.planSaved = true; p.o.Store.PutPlan(saved) })
+			post(func() { p.o.Store.PutPlan(saved); mine(func() { p.planSaved = true })() })
 		}
 		err := b.Provision(ctx, srv.ID, password, func(r provisioning.StepResult) {
-			post(func() { p.progress = append(p.progress, r) })
+			post(mine(func() { p.progress = append(p.progress, r) }))
 		})
 		if err != nil {
 			fail(err)
 			return
 		}
-		post(func() { p.busy, p.done, p.password = false, true, "" })
+		post(mine(func() { p.busy, p.done, p.password = false, true, "" }))
 	})
 }
 
