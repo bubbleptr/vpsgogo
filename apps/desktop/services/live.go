@@ -144,7 +144,7 @@ func (l *Live) History(ctx context.Context, id string, since time.Time) ([]monit
 	defer c.Close()
 	arg := "0"
 	if !since.IsZero() {
-		arg = since.UTC().Format(time.RFC3339)
+		arg = since.UTC().Format(time.RFC3339Nano) // the agent returns samples strictly after it
 	}
 	res, err := c.Exec(ctx, "gogo-agent query --since "+arg+" --json")
 	if err != nil {
@@ -170,6 +170,9 @@ func (l *Live) Stream(ctx context.Context, id string, f func(monitoring.Sample))
 	defer c.Close()
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
+	// Closing the connection, not only the session, returns at once even
+	// when the server has silently gone away.
+	defer context.AfterFunc(sctx, func() { c.Close() })()
 	w := &sampleWriter{f: f, stop: stop}
 	err = c.ExecStream(sctx, "gogo-agent stream --json", w)
 	switch {

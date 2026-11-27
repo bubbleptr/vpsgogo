@@ -168,7 +168,8 @@ func (c *Client) ExecInput(ctx context.Context, cmd string, in io.Reader) (ExecR
 // its stdout to stdout as it arrives. It returns when the command exits
 // (nil for exit 0; otherwise an error with its stderr) or when ctx ends,
 // closing the session and returning ctx's error. stdout is not written to
-// after ExecStream returns.
+// after ExecStream returns. On a connection whose peer silently went away,
+// it returns once the Client is closed.
 func (c *Client) ExecStream(ctx context.Context, cmd string, stdout io.Writer) error {
 	sess, err := c.conn.NewSession()
 	if err != nil {
