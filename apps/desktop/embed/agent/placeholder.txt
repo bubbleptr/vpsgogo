@@ -1,0 +1,1 @@
+scripts/build-agent.sh writes gogo-agent here. This file keeps the directory, and so the go:embed pattern, valid before it has run.
