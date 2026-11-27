@@ -51,7 +51,7 @@ type Backend struct {
 	stream     map[string][]monitoring.Sample
 	streamErr  map[string]error
 	provisions int
-	added      int // servers added, for their IDs
+	added      int // the last ID number tried, so removed IDs are not reused
 	calls      []Call
 }
 
@@ -178,9 +178,16 @@ func (b *Backend) AddServer(ctx context.Context, n fleet.NewServer, fingerprint 
 	if n.Name == "" {
 		n.Name = n.Host
 	}
-	b.added++
+	var id string
+	for {
+		b.added++
+		id = fmt.Sprintf("srv-%d", b.added)
+		if !slices.ContainsFunc(b.servers, func(s fleet.Server) bool { return s.ID == id }) {
+			break
+		}
+	}
 	s := fleet.Server{
-		ID:   fmt.Sprintf("srv-%d", b.added),
+		ID:   id,
 		Name: n.Name, Host: n.Host, Port: n.Port, Provider: n.Provider,
 		User: "root", HostKeyFP: fingerprint, CreatedAt: time.Unix(0, 0).UTC(),
 	}
