@@ -40,6 +40,9 @@ type Options struct {
 type Page struct {
 	o  Options
 	id string
+	// gen counts Opens and Closes: a result shows only on the page that
+	// asked for it, though the store always takes it.
+	gen int
 
 	rng     int
 	samples []monitoring.Sample
@@ -63,7 +66,7 @@ func New(o Options) *Page { return &Page{o: o} }
 // Open shows server id and starts loading its history and its stream.
 func (p *Page) Open(id string) {
 	p.Close()
-	*p = Page{o: p.o, id: id, histGen: p.histGen + 1, streamGen: p.streamGen + 1}
+	*p = Page{o: p.o, id: id, gen: p.gen, histGen: p.histGen + 1, streamGen: p.streamGen + 1}
 	p.loadHistory()
 	p.stream()
 }
@@ -74,6 +77,7 @@ func (p *Page) Close() {
 		p.cancel()
 		p.cancel = nil
 	}
+	p.gen++
 	p.streamGen++
 }
 
@@ -259,18 +263,26 @@ func (p *Page) plan(c *ui.Context, pal theme.Palette) {
 	}
 }
 
-// do runs one plan call and applies its result.
-func (p *Page) do(call func(ctx context.Context) (func(), error)) {
+// do runs one plan call. On success its store update applies, and, if the
+// page still shows this server, msg.
+func (p *Page) do(call func(ctx context.Context) (update func(), msg string, err error)) {
 	p.planBusy, p.planMsg, p.planErr = true, "", ""
+	gen := p.gen
 	p.o.Runner.Go(func(post func(func())) {
-		apply, err := call(context.Background())
+		update, msg, err := call(context.Background())
 		post(func() {
+			if err == nil {
+				update()
+			}
+			if gen != p.gen {
+				return
+			}
 			p.planBusy = false
 			if err != nil {
 				p.planErr = err.Error()
 				return
 			}
-			apply()
+			p.form, p.planMsg = nil, msg
 		})
 	})
 }
@@ -280,26 +292,23 @@ func (p *Page) savePlan() {
 	if err != nil {
 		return // the form shows it
 	}
-	p.do(func(ctx context.Context) (func(), error) {
-		return func() { p.o.Store.PutPlan(s); p.form = nil }, p.o.Backend.SavePlan(ctx, s)
+	p.do(func(ctx context.Context) (func(), string, error) {
+		return func() { p.o.Store.PutPlan(s) }, "", p.o.Backend.SavePlan(ctx, s)
 	})
 }
 
 func (p *Page) renew() {
 	id := p.id
-	p.do(func(ctx context.Context) (func(), error) {
+	p.do(func(ctx context.Context) (func(), string, error) {
 		s, err := p.o.Backend.Renew(ctx, id)
-		return func() {
-			p.o.Store.PutPlan(s)
-			p.planMsg = "Renewed until " + s.ExpiresAt.String()
-		}, err
+		return func() { p.o.Store.PutPlan(s) }, "Renewed until " + s.ExpiresAt.String(), err
 	})
 }
 
 func (p *Page) deletePlan() {
 	id := p.id
-	p.do(func(ctx context.Context) (func(), error) {
-		return func() { p.o.Store.RemovePlan(id) }, p.o.Backend.DeletePlan(ctx, id)
+	p.do(func(ctx context.Context) (func(), string, error) {
+		return func() { p.o.Store.RemovePlan(id) }, "", p.o.Backend.DeletePlan(ctx, id)
 	})
 }
 
@@ -313,16 +322,21 @@ func (p *Page) remove(c *ui.Context, pal theme.Palette, name string) {
 	}
 	msg := "VPSGoGo forgets this server, its key and its plan. The server itself keeps running."
 	if ui.AlertDialog(c, &p.confirming, "Remove "+name+"?", msg, "Cancel", "Remove") == 1 {
-		id := p.id
+		id, gen := p.id, p.gen
 		p.o.Runner.Go(func(post func(func())) {
 			err := p.o.Backend.RemoveServer(context.Background(), id)
 			post(func() {
+				if err == nil {
+					p.o.Store.RemoveServer(id)
+				}
+				if gen != p.gen {
+					return
+				}
 				if err != nil {
 					p.removeErr = err.Error()
 					return
 				}
 				p.Close()
-				p.o.Store.RemoveServer(id)
 				if p.o.OnRemoved != nil {
 					p.o.OnRemoved()
 				}

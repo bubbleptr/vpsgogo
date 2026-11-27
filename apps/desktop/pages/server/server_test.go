@@ -216,3 +216,22 @@ func TestRemoveServerAsksFirst(t *testing.T) {
 		t.Fatalf("removed %d, callback %d, store %+v", g.b.Count("RemoveServer"), g.removed, g.s.Servers)
 	}
 }
+
+func TestResultsAfterLeavingUpdateOnlyTheStore(t *testing.T) {
+	g := newRig(t, monthly)
+	g.open()
+	g.click("Mark renewed")
+	g.click("Remove server")
+	g.click("Remove")
+	g.p.Close() // the user left before either finished
+	g.flush()
+	if g.removed != 0 {
+		t.Fatal("a removal that finished after leaving moved the user")
+	}
+	if len(g.s.Servers) != 0 {
+		t.Fatal("the store kept the removed server")
+	}
+	if g.p.planMsg != "" {
+		t.Fatalf("a renewal after leaving set %q", g.p.planMsg)
+	}
+}
