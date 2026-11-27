@@ -68,9 +68,14 @@ func (g *rig) want(texts ...string) {
 	}
 }
 
+// noSecrets fails if a secret shows as a text or as a control's value.
 func (g *rig) noSecrets() {
 	g.t.Helper()
-	for _, s := range g.tt.Texts() {
+	shown := g.tt.Texts()
+	for _, a := range g.tt.AccessAll() {
+		shown = append(shown, a.Value)
+	}
+	for _, s := range shown {
 		for _, secret := range []string{hookURL, apiKey, botTok, "s3cr3t"} {
 			if strings.Contains(s, secret) {
 				g.t.Fatalf("a secret shows in %q", s)
